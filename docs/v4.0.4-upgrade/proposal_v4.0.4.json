@@ -1,0 +1,24 @@
+{
+  "messages": [
+    {
+      "@type": "/cosmos.gov.v1.MsgExecLegacyContent",
+      "content": {
+        "@type": "/cosmos.upgrade.v1beta1.SoftwareUpgradeProposal",
+        "title": "Upgrade to v4.0.4 (fix Ledger/Amino signing of CosmWasm transactions)",
+        "description": "Fixes Amino JSON (SIGN_MODE_LEGACY_AMINO_JSON) signing of CosmWasm messages. Since v4.0.0 (wasmd v0.50.0), the node rebuilds MsgExecuteContract/MsgInstantiateContract/MsgMigrateContract sign bytes with the contract message as base64 and empty funds as null, while Ledger, Keplr/Leap Amino signers and CosmJS sign inline JSON and an empty list; every Amino-signed contract transaction (marketplace buy/offer/list/transfer, mint) is rejected with 'signature verification failed'. v4.0.4 backports CosmWasm/wasmd#1844 and #1860 (both released in wasmd v0.51.0) onto wasmd v0.50.0. Binary-only: no store, parameter or state changes; the upgrade handler only runs module migrations (no version bumps). Direct-mode signing is unaffected. A coordinated upgrade is required because the fix changes which transactions pass signature verification. On-chain upgrade name: v4.0.4. Binaries and checksums in the v4.0.4 GitHub release.",
+        "plan": {
+          "name": "v4.0.4",
+          "time": "0001-01-01T00:00:00Z",
+          "height": "PENDING_HEIGHT",
+          "info": "{\"binaries\":{\"linux/amd64\":\"PENDING_AMD64\",\"linux/arm64\":\"PENDING_ARM64\"}}",
+          "upgraded_client_state": null
+        }
+      },
+      "authority": "pasg10d07y265gmmuvt4z0w9aw880jnsr700je62lmv"
+    }
+  ],
+  "metadata": "",
+  "deposit": "100000000000upasg",
+  "title": "Upgrade to v4.0.4 (fix Ledger/Amino signing of CosmWasm transactions)",
+  "summary": "Binary-only fix so Ledger/Amino-signed CosmWasm transactions are accepted again. No state changes. See description."
+}

@@ -4,15 +4,21 @@ import (
 	"fmt"
 	"time"
 
-	storetypes "github.com/cosmos/cosmos-sdk/store/types"
+	"context"
+	sdkmath "cosmossdk.io/math"
+	storetypes "cosmossdk.io/store/types"
+	upgradetypes "cosmossdk.io/x/upgrade/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	auth "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	vestingtypes "github.com/cosmos/cosmos-sdk/x/auth/vesting/types"
 	bank "github.com/cosmos/cosmos-sdk/x/bank/keeper"
+	consensusparamkeeper "github.com/cosmos/cosmos-sdk/x/consensus/keeper"
 	distribution "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
-	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
+	govkeeper "github.com/cosmos/cosmos-sdk/x/gov/keeper"
+	paramskeeper "github.com/cosmos/cosmos-sdk/x/params/keeper"
+	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	"github.com/envadiv/Passage3D/app/upgrades"
 	claim "github.com/envadiv/Passage3D/x/claim/keeper"
 	claimtypes "github.com/envadiv/Passage3D/x/claim/types"
@@ -22,7 +28,7 @@ const Name = "v2.2.0"
 const upasgDenom = "upasg"
 
 // 150,000,000 $PASG tokens
-var amount = sdk.NewCoins(sdk.NewCoin(upasgDenom, sdk.NewInt(150000000000000)))
+var amount = sdk.NewCoins(sdk.NewCoin(upasgDenom, sdkmath.NewInt(150000000000000)))
 
 var Upgrade = upgrades.Upgrade{
 	UpgradeName:          Name,
@@ -37,10 +43,14 @@ func CreateUpgradeHandler(
 	bk bank.Keeper,
 	ak auth.AccountKeeper,
 	ck claim.Keeper,
+	_ consensusparamkeeper.Keeper,
+	_ paramskeeper.Keeper,
+	_ *stakingkeeper.Keeper,
+	_ govkeeper.Keeper,
 ) upgradetypes.UpgradeHandler {
 
-	return func(ctx sdk.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
-		if err := ExecuteProposal(ctx, ak, bk, ck, dk); err != nil {
+	return func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+		if err := ExecuteProposal(sdk.UnwrapSDKContext(ctx), ak, bk, ck, dk); err != nil {
 			return nil, err
 		}
 
@@ -57,11 +67,14 @@ func ExecuteProposal(ctx sdk.Context, ak auth.AccountKeeper, bk bank.Keeper, ck 
 	}
 
 	// 3 year lock-up from relaunch and thereafter weekly vesting until end of year 5 from relaunch
-	pva := vestingtypes.NewPeriodicVestingAccount(authtypes.NewBaseAccount(vestingAcc, nil, ak.GetNextAccountNumber(ctx), 0),
+	pva, errVest := vestingtypes.NewPeriodicVestingAccount(authtypes.NewBaseAccount(vestingAcc, nil, ak.NextAccountNumber(ctx), 0),
 		amount,
 		1784905200,
 		genVestingPeriods(),
 	)
+	if errVest != nil {
+		return errVest
+	}
 	ak.SetAccount(ctx, pva)
 
 	if err := dk.DistributeFromFeePool(ctx, amount, vestingAcc); err != nil {
@@ -90,10 +103,10 @@ func ExecuteProposal(ctx sdk.Context, ak auth.AccountKeeper, bk bank.Keeper, ck 
 	}
 
 	oldAmount := sdk.Coins{
-		sdk.NewCoin(amount[0].Denom, sdk.NewInt(18946800000000)),
+		sdk.NewCoin(amount[0].Denom, sdkmath.NewInt(18946800000000)),
 	}
 
-	amount = amount.Sub(oldAmount)
+	amount = amount.Sub(oldAmount...)
 
 	// send the added balances from airdrop account to claim module account
 	if err := bk.SendCoinsFromAccountToModule(ctx, airdropAccAddr, claimtypes.ModuleName, amount); err != nil {
@@ -115,13 +128,13 @@ func genVestingPeriods() []vestingtypes.Period {
 	var periods []vestingtypes.Period
 	periods = append(periods, vestingtypes.Period{
 		Length: 0,
-		Amount: sdk.NewCoins(sdk.NewCoin(upasgDenom, sdk.NewInt(1442307692379))),
+		Amount: sdk.NewCoins(sdk.NewCoin(upasgDenom, sdkmath.NewInt(1442307692379))),
 	})
 
 	for i := 0; i < 103; i++ {
 		periods = append(periods, vestingtypes.Period{
 			Length: 604800,
-			Amount: sdk.NewCoins(sdk.NewCoin(upasgDenom, sdk.NewInt(1442307692307))),
+			Amount: sdk.NewCoins(sdk.NewCoin(upasgDenom, sdkmath.NewInt(1442307692307))),
 		})
 	}
 
