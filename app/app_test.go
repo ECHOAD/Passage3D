@@ -1,58 +1,36 @@
 package app
 
 import (
-	"os"
+	"encoding/json"
+	"fmt"
 	"testing"
+	"time"
 
-	"github.com/envadiv/Passage3D/x/claim"
-
-	"github.com/stretchr/testify/require"
 	abci "github.com/cometbft/cometbft/abci/types"
-	"github.com/cometbft/cometbft/libs/log"
-	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
-	dbm "github.com/cometbft/cometbft-db"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	"github.com/stretchr/testify/require"
 
-	"github.com/cosmos/ibc-go/v7/modules/apps/transfer"
-	ibc "github.com/cosmos/ibc-go/v7/modules/core"
-
-	"github.com/CosmWasm/wasmd/x/wasm"
-	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
-	"github.com/cosmos/cosmos-sdk/baseapp"
+	upgradetypes "cosmossdk.io/x/upgrade/types"
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/types/module"
-	"github.com/cosmos/cosmos-sdk/x/auth"
-	"github.com/cosmos/cosmos-sdk/x/auth/vesting"
-	authzmodule "github.com/cosmos/cosmos-sdk/x/authz/module"
-	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
-	"github.com/cosmos/cosmos-sdk/x/capability"
-	"github.com/cosmos/cosmos-sdk/x/crisis"
-	"github.com/cosmos/cosmos-sdk/x/distribution"
-	"github.com/cosmos/cosmos-sdk/x/evidence"
-	feegrantmodule "github.com/cosmos/cosmos-sdk/x/feegrant/module"
-	"github.com/cosmos/cosmos-sdk/x/genutil"
-	"github.com/cosmos/cosmos-sdk/x/gov"
-	"github.com/cosmos/cosmos-sdk/x/mint"
-	"github.com/cosmos/cosmos-sdk/x/params"
-	"github.com/cosmos/cosmos-sdk/x/slashing"
-	"github.com/cosmos/cosmos-sdk/x/staking"
-	"github.com/cosmos/cosmos-sdk/x/upgrade"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
+	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
+	paramproposal "github.com/cosmos/cosmos-sdk/x/params/types/proposal"
+
+	v404 "github.com/envadiv/Passage3D/app/upgrades/v4.0.4"
+	claimtypes "github.com/envadiv/Passage3D/x/claim/types"
 )
 
-var emptyWasmOpts []wasm.Option = nil
-
-func TestSimAppExportAndBlockedAddrs(t *testing.T) {
-	encCfg := MakeEncodingConfig()
-	db := dbm.NewMemDB()
-	app := NewPassageApp(log.NewTMLogger(log.NewSyncWriter(os.Stdout)), db, nil, true, map[int64]bool{}, DefaultNodeHome, 0, encCfg, wasmtypes.EnableAllProposals, EmptyAppOptions{}, emptyWasmOpts)
-
+func TestBlockedAddrs(t *testing.T) {
+	app := NewTestApp(0)
 	for acc := range maccPerms {
 		require.True(
 			t,
 			app.BankKeeper.BlockedAddr(app.AccountKeeper.GetModuleAddress(acc)),
-			"ensure that blocked addresses are properly set in bank keeper",
+			"module account %s must be a blocked address in the bank keeper", acc,
 		)
 	}
-
 }
 
 func TestGetMaccPerms(t *testing.T) {
@@ -60,145 +38,204 @@ func TestGetMaccPerms(t *testing.T) {
 	require.Equal(t, maccPerms, dup, "duplicated module account permissions differed from actual module account permissions")
 }
 
-func TestRunMigrations(t *testing.T) {
-	t.Skip("SDK 0.47 reworked the module-manager migration registry and bumped module consensus versions; this verbatim SDK harness test exercises framework plumbing, not Passage logic. x/claim migrations are covered by the x/claim keeper tests.")
-	db := dbm.NewMemDB()
-	encCfg := MakeEncodingConfig()
-	logger := log.NewTMLogger(log.NewSyncWriter(os.Stdout))
-	app := NewPassageApp(logger, db, nil, true, map[int64]bool{}, DefaultNodeHome, 0, encCfg, wasmtypes.EnableAllProposals, EmptyAppOptions{}, emptyWasmOpts)
+// nextBlock finalizes and commits one empty block.
+func nextBlock(t *testing.T, app *PassageApp) {
+	t.Helper()
+	_, err := app.FinalizeBlock(&abci.RequestFinalizeBlock{
+		Height: app.LastBlockHeight() + 1,
+		Time:   time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	_, err = app.Commit()
+	require.NoError(t, err)
+}
 
-	// Create a new baseapp and configurator for the purpose of this test.
-	bApp := baseapp.NewBaseApp(appName, logger, db, encCfg.TxConfig.TxDecoder())
-	bApp.SetCommitMultiStoreTracer(nil)
-	bApp.SetInterfaceRegistry(encCfg.InterfaceRegistry)
-	app.BaseApp = bApp
-	app.configurator = module.NewConfigurator(app.appCodec, app.MsgServiceRouter(), app.GRPCQueryRouter())
+// deliverCtx returns a DeliverTx-mode context writing directly to the committed
+// multistore (no block in progress is needed).
+func deliverCtx(app *PassageApp) sdk.Context {
+	return app.NewUncachedContext(false, cmtproto.Header{Height: app.LastBlockHeight() + 1, Time: time.Now().UTC()})
+}
 
-	// We register all modules on the Configurator, except x/bank. x/bank will
-	// serve as the test subject on which we run the migration tests.
-	//
-	// The loop below is the same as calling `RegisterServices` on
-	// ModuleManager, except that we skip x/bank.
-	for name, mod := range app.mm.Modules {
-		if name == banktypes.ModuleName {
-			continue
-		}
+// requireUniqueAccountNumbers checks that every account has its own number and
+// owns the matching entry of the x/auth account-number index.
+func requireUniqueAccountNumbers(t *testing.T, app *PassageApp, ctx sdk.Context) {
+	t.Helper()
+	seen := map[uint64]string{}
+	err := app.AccountKeeper.Accounts.Walk(ctx, nil, func(addr sdk.AccAddress, acc sdk.AccountI) (bool, error) {
+		n := acc.GetAccountNumber()
+		prev, dup := seen[n]
+		require.Falsef(t, dup, "account number %d used by %s and %s", n, prev, addr)
+		seen[n] = addr.String()
 
-		if svcMod, ok := mod.(module.HasServices); ok {
-			svcMod.RegisterServices(app.configurator)
-		}
-	}
+		owner, err := app.AccountKeeper.Accounts.Indexes.Number.MatchExact(ctx, n)
+		require.NoErrorf(t, err, "account number %d of %s is not indexed", n, addr)
+		require.Truef(t, owner.Equals(addr), "account number %d indexed to %s instead of %s", n, owner, addr)
+		return false, nil
+	})
+	require.NoError(t, err)
+}
 
-	// Initialize the chain
-	app.InitChain(abci.RequestInitChain{})
-	app.Commit()
+// A fresh genesis with a genesis account numbered 0 used to panic in x/claim
+// InitGenesis ("collections: conflict: index uniqueness constrain violation: 0").
+func TestFreshGenesisHasUniqueAccountNumbers(t *testing.T) {
+	app := Setup(false)
+	ctx := deliverCtx(app)
 
-	testCases := []struct {
-		name         string
-		moduleName   string
-		forVersion   uint64
-		expRegErr    bool // errors while registering migration
-		expRegErrMsg string
-		expRunErr    bool // errors while running migration
-		expRunErrMsg string
-		expCalled    int
-	}{
-		{
-			"cannot register migration for version 0",
-			"bank", 0,
-			true, "module migration versions should start at 1: invalid version", false, "", 0,
-		},
-		{
-			"throws error on RunMigrations if no migration registered for bank",
-			"", 1,
-			false, "", true, "no migrations found for module bank: not found", 0,
-		},
-		{
-			"can register and run migration handler for x/bank",
-			"bank", 1,
-			false, "", false, "", 1,
-		},
-		{
-			"cannot register migration handler for same module & forVersion",
-			"bank", 1,
-			true, "another migration for module bank and version 1 already exists: internal logic error", false, "", 0,
-		},
-	}
+	claimAcc := app.AccountKeeper.GetAccount(ctx, app.AccountKeeper.GetModuleAddress(claimtypes.ModuleName))
+	require.NotNil(t, claimAcc, "claim module account must exist after genesis")
+	requireUniqueAccountNumbers(t, app, ctx)
+}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var err error
-
-			// Since it's very hard to test actual in-place store migrations in
-			// tests (due to the difficulty of maintaining multiple versions of a
-			// module), we're just testing here that the migration logic is
-			// called.
-			called := 0
-
-			if tc.moduleName != "" {
-				// Register migration for module from version `forVersion` to `forVersion+1`.
-				err = app.configurator.RegisterMigration(tc.moduleName, tc.forVersion, func(sdk.Context) error {
-					called++
-
-					return nil
-				})
-
-				if tc.expRegErr {
-					require.EqualError(t, err, tc.expRegErrMsg)
-
-					return
-				}
+// Export (normal and for zero height) must produce a genesis that a new chain can
+// import. Zero-height export used to panic ("not yet ported to SDK v0.50").
+func TestExportAndReimport(t *testing.T) {
+	for _, forZeroHeight := range []bool{false, true} {
+		t.Run(fmt.Sprintf("forZeroHeight=%v", forZeroHeight), func(t *testing.T) {
+			app := Setup(false)
+			for i := 0; i < 3; i++ {
+				nextBlock(t, app)
 			}
+
+			exported, err := app.ExportAppStateAndValidators(forZeroHeight, nil, nil)
+			require.NoError(t, err)
+			require.NotEmpty(t, exported.Validators)
+			if forZeroHeight {
+				require.Equal(t, int64(0), exported.Height)
+			} else {
+				require.Equal(t, app.LastBlockHeight()+1, exported.Height)
+			}
+
+			var genState GenesisState
+			require.NoError(t, json.Unmarshal(exported.AppState, &genState))
+
+			newApp := NewTestApp(0)
+			ctx := newApp.NewContextLegacy(true, cmtproto.Header{Height: app.LastBlockHeight()})
+			require.NotPanics(t, func() {
+				_, err = newApp.mm.InitGenesis(ctx, newApp.AppCodec(), genState)
+			})
 			require.NoError(t, err)
 
-			// Run migrations only for bank. That's why we put the initial
-			// version for bank as 1, and for all other modules, we put as
-			// their latest ConsensusVersion.
-			_, err = app.mm.RunMigrations(
-				app.NewContext(true, tmproto.Header{Height: app.LastBlockHeight()}), app.configurator,
-				module.VersionMap{
-					"bank":         1,
-					"auth":         auth.AppModule{}.ConsensusVersion(),
-					"authz":        authzmodule.AppModule{}.ConsensusVersion(),
-					"staking":      staking.AppModule{}.ConsensusVersion(),
-					"mint":         mint.AppModule{}.ConsensusVersion(),
-					"distribution": distribution.AppModule{}.ConsensusVersion(),
-					"slashing":     slashing.AppModule{}.ConsensusVersion(),
-					"gov":          gov.AppModule{}.ConsensusVersion(),
-					"params":       params.AppModule{}.ConsensusVersion(),
-					"upgrade":      upgrade.AppModule{}.ConsensusVersion(),
-					"vesting":      vesting.AppModule{}.ConsensusVersion(),
-					"feegrant":     feegrantmodule.AppModule{}.ConsensusVersion(),
-					"evidence":     evidence.AppModule{}.ConsensusVersion(),
-					"crisis":       crisis.AppModule{}.ConsensusVersion(),
-					"genutil":      genutil.AppModule{}.ConsensusVersion(),
-					"capability":   capability.AppModule{}.ConsensusVersion(),
-					"ibc":          ibc.AppModule{}.ConsensusVersion(),
-					"transfer":     transfer.AppModule{}.ConsensusVersion(),
-					"claim":        claim.AppModule{}.ConsensusVersion(),
-					"wasm":         wasm.AppModule{}.ConsensusVersion(),
-				},
+			oldCtx := deliverCtx(app)
+			require.Equal(t,
+				app.BankKeeper.GetSupply(oldCtx, BondDenom),
+				newApp.BankKeeper.GetSupply(ctx, BondDenom),
+				"total supply must survive export/import",
 			)
-			if tc.expRunErr {
-				require.EqualError(t, err, tc.expRunErrMsg)
-			} else {
-				require.NoError(t, err)
-				// Make sure bank's migration is called.
-				require.Equal(t, tc.expCalled, called)
-			}
+			requireUniqueAccountNumbers(t, newApp, ctx)
 		})
 	}
 }
 
-func TestUpgradeStateOnGenesis(t *testing.T) {
+// Only the requested modules are exported.
+func TestExportModulesToExport(t *testing.T) {
 	app := Setup(false)
+	exported, err := app.ExportAppStateAndValidators(false, nil, []string{"bank"})
+	require.NoError(t, err)
 
-	// make sure the upgrade keeper has version map in state
-	ctx := app.NewContext(false, tmproto.Header{})
-	vm := app.UpgradeKeeper.GetModuleVersionMap(ctx)
-	for v, i := range app.mm.Modules {
-		if cv, ok := i.(module.HasConsensusVersion); ok {
-			require.Equal(t, vm[v], cv.ConsensusVersion())
-		}
-	}
+	var genState GenesisState
+	require.NoError(t, json.Unmarshal(exported.AppState, &genState))
+	require.Len(t, genState, 1)
+	require.Contains(t, genState, "bank")
+}
+
+// passage-2 holds two accounts with account number 0: a vesting multisig (owner
+// of the index entry) and the claim module account, created under SDK v0.45 by
+// the old x/claim InitGenesis. The v4.0.4 upgrade handler must give the claim
+// account a fresh number and keep the owner's index entry.
+func TestUpgradeV404RepairsDuplicateAccountNumber(t *testing.T) {
+	app := Setup(false)
+	ctx := deliverCtx(app)
+	ak := app.AccountKeeper
+
+	owner, err := ak.Accounts.Indexes.Number.MatchExact(ctx, 0)
+	require.NoError(t, err)
+
+	claimAddr := ak.GetModuleAddress(claimtypes.ModuleName)
+	claimAcc := ak.GetAccount(ctx, claimAddr)
+	require.NotNil(t, claimAcc)
+	require.NotEqual(t, uint64(0), claimAcc.GetAccountNumber())
+
+	// Recreate the passage-2 state: the claim account record says number 0 and the
+	// account-number index has no entry for it (index 0 still points at owner).
+	require.NoError(t, ak.Accounts.Indexes.Number.Unreference(ctx, claimAddr, func() (sdk.AccountI, error) {
+		return claimAcc, nil
+	}))
+	require.NoError(t, claimAcc.SetAccountNumber(0))
+	bz, err := app.AppCodec().MarshalInterface(claimAcc)
+	require.NoError(t, err)
+	key := append(append([]byte{}, authtypes.AddressStoreKeyPrefix.Bytes()...), claimAddr...)
+	ctx.KVStore(app.GetKey(authtypes.StoreKey)).Set(key, bz)
+	require.Equal(t, uint64(0), ak.GetAccount(ctx, claimAddr).GetAccountNumber())
+
+	// Precondition: the state is inconsistent. Re-saving the claim account (any
+	// SetAccount on it) silently steals index entry 0 from its owner.
+	cacheCtx, _ := ctx.CacheContext()
+	ak.SetAccount(cacheCtx, ak.GetAccount(cacheCtx, claimAddr))
+	stolen, err := ak.Accounts.Indexes.Number.MatchExact(cacheCtx, 0)
+	require.NoError(t, err)
+	require.True(t, stolen.Equals(claimAddr), "precondition: re-saving the duplicate steals index entry 0")
+
+	// Run the real v4.0.4 upgrade handler.
+	handler := v404.CreateUpgradeHandler(
+		app.mm, app.configurator, app.DistrKeeper, app.BankKeeper, app.AccountKeeper, app.ClaimKeeper,
+		app.ConsensusParamsKeeper, app.ParamsKeeper, app.StakingKeeper, app.GovKeeper,
+	)
+	fromVM, err := app.UpgradeKeeper.GetModuleVersionMap(ctx)
+	require.NoError(t, err)
+	toVM, err := handler(ctx, upgradetypes.Plan{Name: v404.Name, Height: ctx.BlockHeight()}, fromVM)
+	require.NoError(t, err)
+	require.Equal(t, fromVM, toVM, "v4.0.4 must not bump any module consensus version")
+
+	repaired := ak.GetAccount(ctx, claimAddr)
+	require.NotEqual(t, uint64(0), repaired.GetAccountNumber())
+	idxOwner, err := ak.Accounts.Indexes.Number.MatchExact(ctx, 0)
+	require.NoError(t, err)
+	require.True(t, idxOwner.Equals(owner), "account number 0 must stay with its original owner")
+	idxClaim, err := ak.Accounts.Indexes.Number.MatchExact(ctx, repaired.GetAccountNumber())
+	require.NoError(t, err)
+	require.True(t, idxClaim.Equals(claimAddr))
+	requireUniqueAccountNumbers(t, app, ctx)
+
+	// Idempotent.
+	changed, err := v404.FixDuplicateAccountNumbers(ctx, ak)
+	require.NoError(t, err)
+	require.Empty(t, changed)
+
+	// The repaired state can be exported and imported, keeping the account numbers.
+	fixed, err := app.mm.ExportGenesisForModules(ctx, app.AppCodec(), nil)
+	require.NoError(t, err)
+	importApp := NewTestApp(0)
+	importCtx := importApp.NewContextLegacy(true, cmtproto.Header{Height: app.LastBlockHeight()})
+	require.NotPanics(t, func() {
+		_, err = importApp.mm.InitGenesis(importCtx, importApp.AppCodec(), fixed)
+	})
+	require.NoError(t, err)
+	require.Equal(t, repaired.GetAccountNumber(),
+		importApp.AccountKeeper.GetAccount(importCtx, claimAddr).GetAccountNumber())
+	requireUniqueAccountNumbers(t, importApp, importCtx)
+}
+
+// x/claim params live in an x/params subspace; governance can only change them
+// through a legacy ParameterChangeProposal, which needs the legacy gov router.
+func TestLegacyParamChangeProposalUpdatesClaimParams(t *testing.T) {
+	app := Setup(false)
+	ctx := deliverCtx(app)
+
+	require.NotNil(t, app.GovKeeper.LegacyRouter(), "legacy gov router must be registered")
+
+	content := paramproposal.NewParameterChangeProposal("claim denom", "change claim denom", []paramproposal.ParamChange{
+		{Subspace: claimtypes.ModuleName, Key: string(claimtypes.KeyClaimDenom), Value: `"uclaimtest"`},
+	})
+	contentAny, err := codectypes.NewAnyWithValue(content)
+	require.NoError(t, err)
+	msg := govv1.NewMsgExecLegacyContent(contentAny, authtypes.NewModuleAddress(govtypes.ModuleName).String())
+
+	handler := app.MsgServiceRouter().Handler(msg)
+	require.NotNil(t, handler)
+	_, err = handler(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, "uclaimtest", app.ClaimKeeper.GetParams(ctx).ClaimDenom)
+
+	// A text proposal (v1beta1 content) must also be routable.
+	require.True(t, app.GovKeeper.LegacyRouter().HasRoute(govtypes.RouterKey))
 }

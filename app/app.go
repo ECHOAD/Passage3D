@@ -62,6 +62,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/cosmos/cosmos-sdk/runtime"
 	runtimeservices "github.com/cosmos/cosmos-sdk/runtime/services"
+	"github.com/cosmos/cosmos-sdk/server"
 	"github.com/cosmos/cosmos-sdk/server/api"
 	"github.com/cosmos/cosmos-sdk/server/config"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
@@ -102,6 +103,7 @@ import (
 	govkeeper "github.com/cosmos/cosmos-sdk/x/gov/keeper"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
+	govv1beta1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1beta1"
 	"github.com/cosmos/cosmos-sdk/x/group"
 	groupkeeper "github.com/cosmos/cosmos-sdk/x/group/keeper"
 	groupmodule "github.com/cosmos/cosmos-sdk/x/group/module"
@@ -112,6 +114,7 @@ import (
 	paramsclient "github.com/cosmos/cosmos-sdk/x/params/client"
 	paramskeeper "github.com/cosmos/cosmos-sdk/x/params/keeper"
 	paramstypes "github.com/cosmos/cosmos-sdk/x/params/types"
+	paramproposal "github.com/cosmos/cosmos-sdk/x/params/types/proposal"
 	"github.com/cosmos/cosmos-sdk/x/slashing"
 	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
@@ -468,6 +471,18 @@ func NewPassageApp(
 		stakingKeeper, app.DistrKeeper, app.MsgServiceRouter(), govtypes.DefaultConfig(), authority,
 	)
 
+	// Legacy (v1beta1) proposal routes, executed through MsgExecLegacyContent.
+	// Without a legacy router every legacy proposal (text proposals submitted via
+	// v1beta1, x/params ParameterChangeProposal) fails with a nil-pointer panic, and
+	// x/claim params, which still live in an x/params subspace, cannot be changed
+	// by governance at all. (v2.x registered these routes; they were dropped in the
+	// SDK v0.50 migration.)
+	govRouter := govv1beta1.NewRouter()
+	govRouter.
+		AddRoute(govtypes.RouterKey, govv1beta1.ProposalHandler).
+		AddRoute(paramproposal.RouterKey, params.NewParamChangeProposalHandler(app.ParamsKeeper))
+	govKeeper.SetLegacyRouter(govRouter)
+
 	app.GovKeeper = *govKeeper.SetHooks(
 		govtypes.NewMultiGovHooks(
 		// register the governance hooks
@@ -682,11 +697,12 @@ func NewPassageApp(
 				SignModeHandler: encodingConfig.TxConfig.SignModeHandler(),
 				SigGasConsumer:  ante.DefaultSigVerificationGasConsumer,
 			},
-			IBCKeeper:         app.IBCKeeper,
-			WasmConfig:        wasmConfig,
-			TxCounterStoreKey: keys[wasm.StoreKey],
-			CircuitKeeper:     &app.CircuitKeeper,
-			Codec:             appCodec,
+			IBCKeeper:             app.IBCKeeper,
+			WasmConfig:            wasmConfig,
+			WasmKeeper:            &app.WasmKeeper,
+			TXCounterStoreService: runtime.NewKVStoreService(keys[wasm.StoreKey]),
+			CircuitKeeper:         &app.CircuitKeeper,
+			Codec:                 appCodec,
 		},
 	)
 
@@ -889,10 +905,16 @@ func (app *PassageApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.AP
 	authtx.RegisterGRPCGatewayRoutes(clientCtx, apiSvr.GRPCGatewayRouter)
 	// Register new tendermint queries routes from grpc-gateway.
 	tmservice.RegisterGRPCGatewayRoutes(clientCtx, apiSvr.GRPCGatewayRouter)
+	// Register node gRPC service routes (/cosmos/base/node/v1beta1/config, /status).
+	nodeservice.RegisterGRPCGatewayRoutes(clientCtx, apiSvr.GRPCGatewayRouter)
 
 	// Register legacy and grpc-gateway routes for all modules.
 	ModuleBasics.RegisterGRPCGatewayRoutes(clientCtx, apiSvr.GRPCGatewayRouter)
 
+	// Register swagger API from root so that other applications can override easily.
+	if err := server.RegisterSwaggerAPI(apiSvr.ClientCtx, apiSvr.Router, apiConfig.Swagger); err != nil {
+		panic(err)
+	}
 }
 
 // RegisterTxService implements the Application.RegisterTxService method.
@@ -908,6 +930,31 @@ func (app *PassageApp) RegisterTendermintService(clientCtx client.Context) {
 // RegisterNodeService implements the Application.RegisterNodeService method.
 func (app *PassageApp) RegisterNodeService(clientCtx client.Context, cfg config.Config) {
 	nodeservice.RegisterNodeService(clientCtx, app.GRPCQueryRouter(), cfg)
+}
+
+// DefaultGenesis returns the default genesis state of every module.
+func (app *PassageApp) DefaultGenesis() map[string]json.RawMessage {
+	return app.BasicModuleManager.DefaultGenesis(app.appCodec)
+}
+
+// GetStoreKeys returns all the KV store keys of the application (used by the
+// simulation import/export store comparison).
+func (app *PassageApp) GetStoreKeys() []storetypes.StoreKey {
+	keys := make([]storetypes.StoreKey, 0, len(app.keys))
+	for _, key := range app.keys {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+// BlockedAddresses returns the module account addresses that cannot receive
+// funds through x/bank (same set as ModuleAccountAddrs).
+func BlockedAddresses() map[string]bool {
+	blocked := make(map[string]bool)
+	for acc := range GetMaccPerms() {
+		blocked[authtypes.NewModuleAddress(acc).String()] = true
+	}
+	return blocked
 }
 
 // GetMaccPerms returns a copy of the module account permissions

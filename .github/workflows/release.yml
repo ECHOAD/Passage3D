@@ -6,8 +6,8 @@ name: Release
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'      # e.g. v3.0.0
-      - 'v[0-9]+.[0-9]+.[0-9]+-*'    # e.g. v3.0.0-rc1
+      - 'v[0-9]+.[0-9]+.[0-9]+'      # e.g. v4.0.4
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'    # e.g. v4.0.4-rc1
 
 permissions:
   contents: write
@@ -21,11 +21,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      # goreleaser-cross ships Go 1.22.7 with GOTOOLCHAIN=local, while go.mod
+      # requires go 1.22.11 (the toolchain mainnet binaries are built with):
+      # without GOTOOLCHAIN the build aborts with
+      # "go.mod requires go >= 1.22.11 (running go 1.22.7; GOTOOLCHAIN=local)".
       - name: Run GoReleaser (cross)
         run: |
           docker run --rm \
             --entrypoint /bin/bash \
             -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
+            -e GOTOOLCHAIN=go1.22.11 \
             -v "${{ github.workspace }}":/go/src/github.com/envadiv/Passage3D \
             -w /go/src/github.com/envadiv/Passage3D \
             ghcr.io/goreleaser/goreleaser-cross:v1.22.7 \

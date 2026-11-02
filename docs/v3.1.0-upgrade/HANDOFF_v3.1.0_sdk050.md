@@ -1,5 +1,11 @@
 # Passage v3.1.0 — Cosmos SDK 0.47 → 0.50 upgrade (REVIEW CANDIDATE)
 
+> **Historical document.** This hand-off describes the pre-release candidate. What shipped
+> differs: on-chain upgrade name `v4.0.0` (not `v050`, applied on passage-2 at height 19950687),
+> `StoreUpgrades` adds `circuit`, iavl-fork is iavl **v1.2.3** + the empty-store patch,
+> CometBFT v0.38.23, Go 1.22.11. Issues found after v4.0.0 and fixed in v4.0.4 are listed in
+> `CHANGELOG.md` (v4.0.4). Current upgrade docs: `docs/v4.0.4-upgrade/SUBMIT.md`.
+
 Prepared by CryptoDungeon (Ninjaxan). **This is a candidate for your review and
 joint testing — NOT a finished, ship-it binary.** Please read the "Status / what's
 left" section before scheduling any on-chain proposal.

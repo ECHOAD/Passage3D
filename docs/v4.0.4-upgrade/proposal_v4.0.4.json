@@ -1,24 +1,17 @@
 {
   "messages": [
     {
-      "@type": "/cosmos.gov.v1.MsgExecLegacyContent",
-      "content": {
-        "@type": "/cosmos.upgrade.v1beta1.SoftwareUpgradeProposal",
-        "title": "Upgrade to v4.0.4 (fix Ledger/Amino signing of CosmWasm transactions)",
-        "description": "Fixes Amino JSON (SIGN_MODE_LEGACY_AMINO_JSON) signing of CosmWasm messages. Since v4.0.0 (wasmd v0.50.0), the node rebuilds MsgExecuteContract/MsgInstantiateContract/MsgMigrateContract sign bytes with the contract message as base64 and empty funds as null, while Ledger, Keplr/Leap Amino signers and CosmJS sign inline JSON and an empty list; every Amino-signed contract transaction (marketplace buy/offer/list/transfer, mint) is rejected with 'signature verification failed'. v4.0.4 backports CosmWasm/wasmd#1844 and #1860 (both released in wasmd v0.51.0) onto wasmd v0.50.0. Binary-only: no store, parameter or state changes; the upgrade handler only runs module migrations (no version bumps). Direct-mode signing is unaffected. A coordinated upgrade is required because the fix changes which transactions pass signature verification. On-chain upgrade name: v4.0.4. Binaries and checksums in the v4.0.4 GitHub release.",
-        "plan": {
-          "name": "v4.0.4",
-          "time": "0001-01-01T00:00:00Z",
-          "height": "PENDING_HEIGHT",
-          "info": "{\"binaries\":{\"linux/amd64\":\"PENDING_AMD64\",\"linux/arm64\":\"PENDING_ARM64\"}}",
-          "upgraded_client_state": null
-        }
-      },
-      "authority": "pasg10d07y265gmmuvt4z0w9aw880jnsr700je62lmv"
+      "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
+      "authority": "pasg10d07y265gmmuvt4z0w9aw880jnsr700je62lmv",
+      "plan": {
+        "name": "v4.0.4",
+        "height": "PENDING_HEIGHT",
+        "info": "{\"binaries\":{\"linux/amd64\":\"https://github.com/PENDING_REPO/releases/download/v4.0.4/passage-4.0.4-linux-amd64?checksum=sha256:PENDING_AMD64\",\"linux/arm64\":\"https://github.com/PENDING_REPO/releases/download/v4.0.4/passage-4.0.4-linux-arm64?checksum=sha256:PENDING_ARM64\"}}"
+      }
     }
   ],
   "metadata": "",
   "deposit": "100000000000upasg",
-  "title": "Upgrade to v4.0.4 (fix Ledger/Amino signing of CosmWasm transactions)",
-  "summary": "Binary-only fix so Ledger/Amino-signed CosmWasm transactions are accepted again. No state changes. See description."
+  "title": "Upgrade to v4.0.4 (Ledger/Amino signing of CosmWasm txs, claim, governance and node-operation fixes)",
+  "summary": "Consensus-breaking maintenance release on top of v4.0.3 (Cosmos SDK v0.50.13). (1) Ledger, Keplr/Leap Amino and CosmJS Amino-signed CosmWasm transactions are accepted again: backport of CosmWasm/wasmd#1844 and #1860 (wasmd v0.51) onto wasmd v0.50.0; since v4.0.0 every Amino-signed MsgExecuteContract/MsgInstantiateContract/MsgMigrateContract failed with 'signature verification failed'. (2) CosmWasm VM back to wasmvm v1.5.7 (v4.0.0-v4.0.3 linked v1.5.0, dropping the 1.5.1-1.5.7 security fixes). (3) x/gov legacy proposal router restored (text and x/params ParameterChangeProposal; x/claim params can be changed by governance again). (4) x/claim: MsgClaim carries the SDK v0.50 signer annotation; the expired airdrop is disabled instead of being ended again on every block; the claim module account gets a unique account number (it shared account number 0 with another account since SDK v0.45; the upgrade handler repairs it). (5) The blocked community-pool multisig can no longer bypass its restriction by adding a MsgFundCommunityPool to the transaction. (6) Node operations: export --for-zero-height, rollback and historical queries of empty stores work again; minimum gas price floor of 12.5upasg restored. No store additions or module consensus-version changes. Every validator must switch binaries at the upgrade height. Upgrade name: v4.0.4. Binaries and checksums in the v4.0.4 release."
 }
