@@ -210,3 +210,11 @@ replace github.com/gogo/protobuf => github.com/regen-network/protobuf v1.3.3-alp
 replace github.com/gin-gonic/gin => github.com/gin-gonic/gin v1.7.0
 
 replace github.com/cosmos/iavl => ./iavl-fork
+
+// wasmd v0.50.0 + backport of CosmWasm/wasmd#1844 ("Fix Amino JSON
+// representation", shipped upstream in v0.51.0). Without it, the
+// SIGN_MODE_LEGACY_AMINO_JSON sign bytes encode RawContractMessage fields
+// (MsgExecuteContract.msg, ...) as base64 while every Amino client (Ledger,
+// Keplr/Leap Amino signers, CosmJS) signs them as inline JSON, so Amino-signed
+// CosmWasm txs fail with "signature verification failed". See wasmd-fork/PASSAGE_PATCH.md.
+replace github.com/CosmWasm/wasmd => ./wasmd-fork
