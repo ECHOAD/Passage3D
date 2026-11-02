@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"os"
 	"time"
 
 	"cosmossdk.io/log"
@@ -43,13 +44,22 @@ var DefaultConsensusParams = &tmproto.ConsensusParams{
 
 var emptyWasmOptions []wasm.Option = nil
 
-func setup(withGenesis bool, invCheckPeriod uint) (*PassageApp, GenesisState) {
-	db := dbm.NewMemDB()
-	encCdc := MakeEncodingConfig()
-	app := NewPassageApp(
-		log.NewNopLogger(), db, nil, true, map[int64]bool{}, DefaultNodeHome,
-		invCheckPeriod, encCdc, nil, EmptyAppOptions{}, emptyWasmOptions,
+// NewTestApp returns a PassageApp on an in-memory DB whose home (wasm cache) is a
+// fresh temporary directory, so tests never touch ~/.passage.
+func NewTestApp(invCheckPeriod uint) *PassageApp {
+	home, err := os.MkdirTemp("", "passage-test-app")
+	if err != nil {
+		panic(err)
+	}
+	return NewPassageApp(
+		log.NewNopLogger(), dbm.NewMemDB(), nil, true, map[int64]bool{}, home,
+		invCheckPeriod, MakeEncodingConfig(), nil, EmptyAppOptions{}, emptyWasmOptions,
 	)
+}
+
+func setup(withGenesis bool, invCheckPeriod uint) (*PassageApp, GenesisState) {
+	app := NewTestApp(invCheckPeriod)
+	encCdc := MakeEncodingConfig()
 	if withGenesis {
 		return app, NewDefaultGenesisState(encCdc.Marshaler)
 	}
@@ -143,20 +153,27 @@ func setupWithGenesisValSet(valSet *tmtypes.ValidatorSet, genAccs []authtypes.Ge
 		panic(err)
 	}
 
-	app.InitChain(
+	if _, err := app.InitChain(
 		&abci.RequestInitChain{
 			Validators:      []abci.ValidatorUpdate{},
 			ConsensusParams: DefaultConsensusParams,
 			AppStateBytes:   stateBytes,
 		},
-	)
+	); err != nil {
+		panic(err)
+	}
 
-	app.Commit()
-	app.FinalizeBlock(&abci.RequestFinalizeBlock{
+	// SDK v0.50 ABCI order: InitChain -> FinalizeBlock(1) -> Commit.
+	if _, err := app.FinalizeBlock(&abci.RequestFinalizeBlock{
 		Height:             app.LastBlockHeight() + 1,
 		Hash:               app.LastCommitID().Hash,
 		NextValidatorsHash: valSet.Hash(),
-	})
+	}); err != nil {
+		panic(err)
+	}
+	if _, err := app.Commit(); err != nil {
+		panic(err)
+	}
 
 	return app
 }

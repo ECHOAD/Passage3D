@@ -2,9 +2,11 @@ package v4_0_4
 
 import (
 	"context"
+	"fmt"
 
 	storetypes "cosmossdk.io/store/types"
 	upgradetypes "cosmossdk.io/x/upgrade/types"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	auth "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	bank "github.com/cosmos/cosmos-sdk/x/bank/keeper"
@@ -20,13 +22,26 @@ import (
 
 // Name is the on-chain upgrade name for Passage v4.0.4.
 //
-// v4.0.4 fixes Amino JSON (SIGN_MODE_LEGACY_AMINO_JSON) signing of CosmWasm
-// messages by backporting CosmWasm/wasmd#1844 onto wasmd v0.50.0 (see
-// wasmd-fork/PASSAGE_PATCH.md). The change is binary-only, but it changes which
-// transactions pass signature verification, so every validator must switch
-// binaries at the same height: a node still on v4.0.3 would reject an
-// Amino-signed MsgExecuteContract that a v4.0.4 node accepts, producing
-// different tx results (LastResultsHash) and halting consensus.
+// v4.0.4 is a consensus-breaking release; every validator must switch binaries at
+// the upgrade height. It contains:
+//
+//   - Amino JSON (SIGN_MODE_LEGACY_AMINO_JSON) signing of CosmWasm messages:
+//     backport of CosmWasm/wasmd#1844 and #1860 onto wasmd v0.50.0 (see
+//     wasmd-fork/PASSAGE_PATCH.md). Ledger / Keplr Amino signatures over
+//     MsgExecuteContract & co. are accepted again.
+//   - x/claim: MsgClaim carries the cosmos.msg.v1.signer annotation (claim txs
+//     were rejected by every node since v4.0.0); the module account is created with
+//     a unique account number; an expired airdrop is disabled instead of being
+//     "ended" again on every block.
+//   - x/gov: the legacy (v1beta1) proposal router is registered again (text and
+//     x/params ParameterChangeProposal content).
+//   - ante: wasm GasRegisterDecorator; the blocked community-pool multisig can no
+//     longer bypass the restriction by adding a MsgFundCommunityPool to the tx.
+//   - CosmWasm VM: wasmvm v1.5.0 -> v1.5.7 (same version as v2.6.0 / v3.0.0).
+//
+// State migration (this handler): duplicate account numbers are repaired, see
+// FixDuplicateAccountNumbers. Module consensus versions are unchanged, so
+// RunMigrations is a no-op.
 //
 // IMPORTANT: this string MUST exactly equal the plan.name in the gov proposal.
 const Name = "v4.0.4"
@@ -38,14 +53,13 @@ var Upgrade = upgrades.Upgrade{
 	StoreUpgrades:        storetypes.StoreUpgrades{},
 }
 
-// CreateUpgradeHandler matches the shared upgrades.Upgrade signature. All
-// keepers are unused: v4.0.4 makes no state or param changes.
+// CreateUpgradeHandler returns the v4.0.4 upgrade handler.
 func CreateUpgradeHandler(
 	mm *module.Manager,
 	configurator module.Configurator,
 	_ distribution.Keeper,
 	_ bank.Keeper,
-	_ auth.AccountKeeper,
+	ak auth.AccountKeeper,
 	_ claim.Keeper,
 	_ consensusparamkeeper.Keeper,
 	_ paramskeeper.Keeper,
@@ -53,6 +67,14 @@ func CreateUpgradeHandler(
 	_ govkeeper.Keeper,
 ) upgradetypes.UpgradeHandler {
 	return func(ctx context.Context, _ upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+		logger := sdk.UnwrapSDKContext(ctx).Logger().With("upgrade", Name)
+
+		changed, err := FixDuplicateAccountNumbers(ctx, ak)
+		if err != nil {
+			return nil, fmt.Errorf("fixing duplicate account numbers: %w", err)
+		}
+		logger.Info("repaired account numbers", "accounts", changed)
+
 		return mm.RunMigrations(ctx, configurator, fromVM)
 	}
 }
