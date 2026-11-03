@@ -28,7 +28,7 @@ type KeeperTestSuite struct {
 }
 
 func (suite *KeeperTestSuite) SetupTest() {
-	suite.app = app.Setup(false)
+	suite.app = app.Setup(false, suite.T())
 	suite.airdropStartTime = time.Now().UTC()
 	// app.Setup commits its first block; write straight to the commit
 	// multistore at the next height.

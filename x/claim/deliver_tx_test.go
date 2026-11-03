@@ -24,7 +24,7 @@ import (
 // FinalizeBlock. Before MsgClaim declared cosmos.msg.v1.signer, the tx was
 // rejected while resolving its signers.
 func TestMsgClaimTxThroughApp(t *testing.T) {
-	a := app.Setup(false)
+	a := app.Setup(false, t)
 	// Passage nodes run with at least this minimum gas price, which the ante
 	// handler enforces in CheckTx. It is applied to the CheckTx state at Commit.
 	baseapp.SetMinGasPrices(passageante.DefaultMinGasPrice + passageante.BaseDenom)(a.BaseApp)

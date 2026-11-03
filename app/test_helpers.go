@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"os"
+	"testing"
 	"time"
 
 	"cosmossdk.io/log"
@@ -57,9 +58,13 @@ func NewTestApp(invCheckPeriod uint) *PassageApp {
 	)
 }
 
-func setup(withGenesis bool, invCheckPeriod uint) (*PassageApp, GenesisState) {
-	app := NewTestApp(invCheckPeriod)
+func setup(withGenesis bool, invCheckPeriod uint, home string) (*PassageApp, GenesisState) {
+	db := dbm.NewMemDB()
 	encCdc := MakeEncodingConfig()
+	app := NewPassageApp(
+		log.NewNopLogger(), db, nil, true, map[int64]bool{}, home,
+		invCheckPeriod, encCdc, nil, EmptyAppOptions{}, emptyWasmOptions,
+	)
 	if withGenesis {
 		return app, NewDefaultGenesisState(encCdc.Marshaler)
 	}
@@ -73,26 +78,33 @@ func setup(withGenesis bool, invCheckPeriod uint) (*PassageApp, GenesisState) {
 // SDK v0.47 panics on an empty validator set after InitGenesis, so the test app
 // must be seeded with at least one validator whose stake >= the configured power
 // reduction.
-func Setup(isCheckTx bool) *PassageApp {
+func Setup(isCheckTx bool, t testing.TB) *PassageApp {
 	privVal := ed25519.GenPrivKey()
 	pubKey := privVal.PubKey()
 	validator := tmtypes.NewValidator(pubKey, 1)
 	valSet := tmtypes.NewValidatorSet([]*tmtypes.Validator{validator})
 
+	// Reserve account zero for the inherited claim genesis module account.
 	senderPrivKey := secp256k1.GenPrivKey()
-	acc := authtypes.NewBaseAccount(senderPrivKey.PubKey().Address().Bytes(), senderPrivKey.PubKey(), 0, 0)
+	acc := authtypes.NewBaseAccount(senderPrivKey.PubKey().Address().Bytes(), senderPrivKey.PubKey(), 1, 0)
 	balance := banktypes.Balance{
 		Address: acc.GetAddress().String(),
 		Coins:   sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, sdkmath.NewInt(100000000000000))),
 	}
 
-	return setupWithGenesisValSet(valSet, []authtypes.GenesisAccount{acc}, balance)
+	app := setupWithGenesisValSet(t.TempDir(), valSet, []authtypes.GenesisAccount{acc}, balance)
+	t.Cleanup(func() {
+		if err := app.Close(); err != nil {
+			t.Errorf("close test app: %v", err)
+		}
+	})
+	return app
 }
 
 // setupWithGenesisValSet initializes a PassageApp from the given validator set
 // and genesis accounts, bonding each validator at the power-reduction threshold.
-func setupWithGenesisValSet(valSet *tmtypes.ValidatorSet, genAccs []authtypes.GenesisAccount, balances ...banktypes.Balance) *PassageApp {
-	app, genesisState := setup(true, 5)
+func setupWithGenesisValSet(home string, valSet *tmtypes.ValidatorSet, genAccs []authtypes.GenesisAccount, balances ...banktypes.Balance) *PassageApp {
+	app, genesisState := setup(true, 5, home)
 
 	authGenesis := authtypes.NewGenesisState(authtypes.DefaultParams(), genAccs)
 	genesisState[authtypes.ModuleName] = app.AppCodec().MustMarshalJSON(authGenesis)

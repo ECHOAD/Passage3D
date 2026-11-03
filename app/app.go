@@ -18,7 +18,7 @@ import (
 	v400 "github.com/envadiv/Passage3D/app/upgrades/v4.0.0"
 	v401 "github.com/envadiv/Passage3D/app/upgrades/v4.0.1"
 	v402 "github.com/envadiv/Passage3D/app/upgrades/v4.0.2"
-	v404 "github.com/envadiv/Passage3D/app/upgrades/v4.0.4"
+	v410 "github.com/envadiv/Passage3D/app/upgrades/v4.1.0"
 
 	"github.com/envadiv/Passage3D/x/claim"
 
@@ -32,7 +32,7 @@ import (
 	ibctransferkeeper "github.com/cosmos/ibc-go/v8/modules/apps/transfer/keeper"
 	ibctransfertypes "github.com/cosmos/ibc-go/v8/modules/apps/transfer/types"
 	ibc "github.com/cosmos/ibc-go/v8/modules/core"
-	ibcclienttypes "github.com/cosmos/ibc-go/v8/modules/core/02-client/types" //nolint:staticcheck // ParamKeyTable for the legacy ibc params subspace
+	ibcclienttypes "github.com/cosmos/ibc-go/v8/modules/core/02-client/types"
 	ibcconnectiontypes "github.com/cosmos/ibc-go/v8/modules/core/03-connection/types"
 	porttypes "github.com/cosmos/ibc-go/v8/modules/core/05-port/types"
 	ibcexported "github.com/cosmos/ibc-go/v8/modules/core/exported"
@@ -208,7 +208,7 @@ var (
 		wasmtypes.ModuleName:           {authtypes.Burner},
 	}
 
-	Upgrades = []upgrades.Upgrade{v2.Upgrade, v240.Upgrade, v250.Upgrade, v260.Upgrade, v300.Upgrade, v400.Upgrade, v401.Upgrade, v402.Upgrade, v404.Upgrade}
+	Upgrades = []upgrades.Upgrade{v2.Upgrade, v240.Upgrade, v250.Upgrade, v260.Upgrade, v300.Upgrade, v400.Upgrade, v401.Upgrade, v402.Upgrade, v410.Upgrade}
 )
 
 var (
@@ -438,7 +438,7 @@ func NewPassageApp(
 	transferModule := transfer.NewIBCModule(app.TransferKeeper)
 
 	wasmDir := filepath.Join(homePath, "wasm")
-	wasmConfig, err := wasm.ReadWasmConfig(appOpts)
+	wasmConfig, err := wasm.ReadNodeConfig(appOpts)
 	if err != nil {
 		panic(fmt.Sprintf("error while reading wasm config: %s", err))
 	}
@@ -446,7 +446,6 @@ func NewPassageApp(
 	// The last arguments can contain custom message handlers, and custom query handlers,
 	// if we want to allow any custom callbacks
 	// See https://github.com/CosmWasm/cosmwasm/blob/main/docs/CAPABILITIES-BUILT-IN.md
-	availableCapabilities := "iterator,staking,stargate,cosmwasm_1_1,cosmwasm_1_2,cosmwasm_1_3"
 	app.WasmKeeper = wasmkeeper.NewKeeper(
 		appCodec,
 		runtime.NewKVStoreService(keys[wasmtypes.StoreKey]),
@@ -463,7 +462,8 @@ func NewPassageApp(
 		app.GRPCQueryRouter(),
 		wasmDir,
 		wasmConfig,
-		availableCapabilities,
+		wasmtypes.VMConfig{},
+		wasmkeeper.BuiltInCapabilities(),
 		authority,
 		wasmOpts...,
 	)

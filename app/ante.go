@@ -19,7 +19,7 @@ import (
 type HandlerOptions struct {
 	ante.HandlerOptions
 	TXCounterStoreService corestoretypes.KVStoreService
-	WasmConfig            wasmtypes.WasmConfig
+	WasmConfig            wasmtypes.NodeConfig
 	WasmKeeper            *wasmkeeper.Keeper
 	IBCKeeper             *ibckeeper.Keeper
 	Codec                 codec.Codec
