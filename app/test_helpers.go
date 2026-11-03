@@ -13,7 +13,7 @@ import (
 	dbm "github.com/cosmos/cosmos-db"
 
 	sdkmath "cosmossdk.io/math"
-	"github.com/CosmWasm/wasmd/x/wasm"
+	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
@@ -42,7 +42,7 @@ var DefaultConsensusParams = &tmproto.ConsensusParams{
 	},
 }
 
-var emptyWasmOptions []wasm.Option = nil
+var emptyWasmOptions []wasmkeeper.Option = nil
 
 // NewTestApp returns a PassageApp on an in-memory DB whose home (wasm cache) is a
 // fresh temporary directory, so tests never touch ~/.passage.
@@ -104,7 +104,7 @@ func setupWithGenesisValSet(valSet *tmtypes.ValidatorSet, genAccs []authtypes.Ge
 	bondAmt := sdk.DefaultPowerReduction
 
 	for _, val := range valSet.Validators {
-		pk, err := cryptocodec.FromTmPubKeyInterface(val.PubKey)
+		pk, err := cryptocodec.FromCmtPubKeyInterface(val.PubKey)
 		if err != nil {
 			panic(err)
 		}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 
 	"cosmossdk.io/log"
 	sdkmath "cosmossdk.io/math"
@@ -82,7 +83,7 @@ func NewRootCmd() (*cobra.Command, appparams.EncodingConfig) {
 	tempApp := app.NewPassageApp(
 		log.NewNopLogger(), dbm.NewMemDB(), nil, false,
 		map[int64]bool{}, tmpHome, uint(1), encodingConfig,
-		app.GetEnabledProposals(), rootAppOptions{home: tmpHome}, []wasm.Option(nil),
+		app.GetEnabledProposals(), rootAppOptions{home: tmpHome}, []wasmkeeper.Option(nil),
 	)
 	basicManager = tempApp.BasicModuleManager
 
@@ -120,7 +121,7 @@ func NewRootCmd() (*cobra.Command, appparams.EncodingConfig) {
 			// that can query coin metadata, so it is only available online. This
 			// must run after ReadFromClientConfig, which sets the RPC client.
 			if !initClientCtx.Offline {
-				enabledSignModes := append(authtx.DefaultSignModes, signing.SignMode_SIGN_MODE_TEXTUAL)
+				enabledSignModes := append(slices.Clone(authtx.DefaultSignModes), signing.SignMode_SIGN_MODE_TEXTUAL)
 				txConfig, err := authtx.NewTxConfigWithOptions(initClientCtx.Codec, authtx.ConfigOptions{
 					EnabledSignModes:           enabledSignModes,
 					TextualCoinMetadataQueryFn: txmodule.NewGRPCCoinMetadataQueryFn(initClientCtx),
@@ -305,7 +306,7 @@ func (a appCreator) newApp(logger log.Logger, db dbm.DB, traceStore io.Writer, a
 		skipUpgradeHeights[int64(h)] = true
 	}
 
-	var wasmOpts []wasm.Option
+	var wasmOpts []wasmkeeper.Option
 	if cast.ToBool(appOpts.Get("telemetry.enabled")) {
 		wasmOpts = append(wasmOpts, wasmkeeper.WithVMCacheMetrics(prometheus.DefaultRegisterer))
 	}

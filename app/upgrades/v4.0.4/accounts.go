@@ -53,7 +53,7 @@ func FixDuplicateAccountNumbers(ctx context.Context, ak auth.AccountKeeper) ([]s
 		return nil, fmt.Errorf("walking accounts: %w", err)
 	}
 
-	var changed []string
+	changed := make([]string, 0, len(candidates))
 	for _, e := range candidates {
 		// Re-evaluate: earlier iterations may have changed the index.
 		oldNumber := e.acc.GetAccountNumber()
