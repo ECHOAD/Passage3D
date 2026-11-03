@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 
 	appparams "github.com/envadiv/Passage3D/app/params"
 	"github.com/envadiv/Passage3D/app/upgrades"
@@ -31,7 +32,7 @@ import (
 	ibctransferkeeper "github.com/cosmos/ibc-go/v8/modules/apps/transfer/keeper"
 	ibctransfertypes "github.com/cosmos/ibc-go/v8/modules/apps/transfer/types"
 	ibc "github.com/cosmos/ibc-go/v8/modules/core"
-	ibcclienttypes "github.com/cosmos/ibc-go/v8/modules/core/02-client/types"
+	ibcclienttypes "github.com/cosmos/ibc-go/v8/modules/core/02-client/types" //nolint:staticcheck // ParamKeyTable for the legacy ibc params subspace
 	ibcconnectiontypes "github.com/cosmos/ibc-go/v8/modules/core/03-connection/types"
 	porttypes "github.com/cosmos/ibc-go/v8/modules/core/05-port/types"
 	ibcexported "github.com/cosmos/ibc-go/v8/modules/core/exported"
@@ -130,6 +131,7 @@ import (
 
 	"github.com/CosmWasm/wasmd/x/wasm"
 	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
+	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
 )
 
 const appName = "passage"
@@ -203,7 +205,7 @@ var (
 		govtypes.ModuleName:            {authtypes.Burner},
 		ibctransfertypes.ModuleName:    {authtypes.Minter, authtypes.Burner},
 		claimtypes.ModuleName:          {authtypes.Minter},
-		wasm.ModuleName:                {authtypes.Burner},
+		wasmtypes.ModuleName:           {authtypes.Burner},
 	}
 
 	Upgrades = []upgrades.Upgrade{v2.Upgrade, v240.Upgrade, v250.Upgrade, v260.Upgrade, v300.Upgrade, v400.Upgrade, v401.Upgrade, v402.Upgrade, v404.Upgrade}
@@ -254,7 +256,7 @@ type PassageApp struct {
 	ScopedIBCKeeper      capabilitykeeper.ScopedKeeper
 	ScopedTransferKeeper capabilitykeeper.ScopedKeeper
 
-	WasmKeeper       wasm.Keeper
+	WasmKeeper       wasmkeeper.Keeper
 	ScopedWasmKeeper capabilitykeeper.ScopedKeeper
 
 	ClaimKeeper claimkeeper.Keeper
@@ -287,7 +289,7 @@ func init() {
 func NewPassageApp(
 	logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, skipUpgradeHeights map[int64]bool,
 	homePath string, invCheckPeriod uint, encodingConfig appparams.EncodingConfig, enabledProposals []string,
-	appOpts servertypes.AppOptions, wasmOpts []wasm.Option, baseAppOptions ...func(*baseapp.BaseApp),
+	appOpts servertypes.AppOptions, wasmOpts []wasmkeeper.Option, baseAppOptions ...func(*baseapp.BaseApp),
 ) *PassageApp {
 
 	appCodec := encodingConfig.Marshaler
@@ -304,7 +306,7 @@ func NewPassageApp(
 		minttypes.StoreKey, distrtypes.StoreKey, slashingtypes.StoreKey,
 		govtypes.StoreKey, paramstypes.StoreKey, upgradetypes.StoreKey, feegrant.StoreKey,
 		evidencetypes.StoreKey, capabilitytypes.StoreKey, crisistypes.StoreKey, consensusparamtypes.StoreKey,
-		authzkeeper.StoreKey, claimtypes.StoreKey, wasm.StoreKey,
+		authzkeeper.StoreKey, claimtypes.StoreKey, wasmtypes.StoreKey,
 		circuittypes.StoreKey, group.StoreKey,
 	)
 	tkeys := storetypes.NewTransientStoreKeys(paramstypes.TStoreKey)
@@ -340,7 +342,7 @@ func NewPassageApp(
 	// grant capabilities for the ibc and ibc-transfer modules
 	scopedIBCKeeper := app.CapabilityKeeper.ScopeToModule(ibcexported.ModuleName)
 	scopedTransferKeeper := app.CapabilityKeeper.ScopeToModule(ibctransfertypes.ModuleName)
-	scopedWasmKeeper := app.CapabilityKeeper.ScopeToModule(wasm.ModuleName)
+	scopedWasmKeeper := app.CapabilityKeeper.ScopeToModule(wasmtypes.ModuleName)
 
 	app.CapabilityKeeper.Seal()
 
@@ -354,7 +356,7 @@ func NewPassageApp(
 	stakingKeeper := stakingkeeper.NewKeeper(
 		appCodec, runtime.NewKVStoreService(keys[stakingtypes.StoreKey]), app.AccountKeeper, app.BankKeeper, authority, authcodec.NewBech32Codec(sdk.GetConfig().GetBech32ValidatorAddrPrefix()), authcodec.NewBech32Codec(sdk.GetConfig().GetBech32ConsensusAddrPrefix()),
 	)
-	enabledSignModes := append(authtx.DefaultSignModes, sigtypes.SignMode_SIGN_MODE_TEXTUAL)
+	enabledSignModes := append(slices.Clone(authtx.DefaultSignModes), sigtypes.SignMode_SIGN_MODE_TEXTUAL)
 	txConfigOpts := authtx.ConfigOptions{
 		EnabledSignModes:           enabledSignModes,
 		TextualCoinMetadataQueryFn: txmodule.NewBankKeeperCoinMetadataQueryFn(app.BankKeeper),
@@ -445,9 +447,9 @@ func NewPassageApp(
 	// if we want to allow any custom callbacks
 	// See https://github.com/CosmWasm/cosmwasm/blob/main/docs/CAPABILITIES-BUILT-IN.md
 	availableCapabilities := "iterator,staking,stargate,cosmwasm_1_1,cosmwasm_1_2,cosmwasm_1_3"
-	app.WasmKeeper = wasm.NewKeeper(
+	app.WasmKeeper = wasmkeeper.NewKeeper(
 		appCodec,
-		runtime.NewKVStoreService(keys[wasm.StoreKey]),
+		runtime.NewKVStoreService(keys[wasmtypes.StoreKey]),
 		app.AccountKeeper,
 		app.BankKeeper,
 		app.StakingKeeper,
@@ -489,14 +491,14 @@ func NewPassageApp(
 		),
 	)
 
-	wasmModule := wasm.NewAppModule(appCodec, &app.WasmKeeper, app.StakingKeeper, app.AccountKeeper, app.BankKeeper, app.MsgServiceRouter(), app.GetSubspace(wasm.ModuleName))
+	wasmModule := wasm.NewAppModule(appCodec, &app.WasmKeeper, app.StakingKeeper, app.AccountKeeper, app.BankKeeper, app.MsgServiceRouter(), app.GetSubspace(wasmtypes.ModuleName))
 
 	wasmHandler := wasm.NewIBCHandler(app.WasmKeeper, app.IBCKeeper.ChannelKeeper, app.IBCKeeper.ChannelKeeper)
 
 	// Create static IBC router, add ibc-tranfer module route, then set and seal it
 	ibcRouter := porttypes.NewRouter()
 	ibcRouter.AddRoute(ibctransfertypes.ModuleName, transferModule)
-	ibcRouter.AddRoute(wasm.ModuleName, wasmHandler)
+	ibcRouter.AddRoute(wasmtypes.ModuleName, wasmHandler)
 	// Setting Router will finalize all routes by sealing router
 	// No more routes can be added
 	app.IBCKeeper.SetRouter(ibcRouter)
@@ -567,7 +569,7 @@ func NewPassageApp(
 		claimtypes.ModuleName,
 		paramstypes.ModuleName,
 		vestingtypes.ModuleName,
-		wasm.ModuleName,
+		wasmtypes.ModuleName,
 	)
 	app.mm.SetOrderEndBlockers(
 		crisistypes.ModuleName,
@@ -591,7 +593,7 @@ func NewPassageApp(
 		upgradetypes.ModuleName,
 		consensusparamtypes.ModuleName,
 		vestingtypes.ModuleName,
-		wasm.ModuleName,
+		wasmtypes.ModuleName,
 	)
 
 	// NOTE: The genutils module must occur after staking so that pools are
@@ -621,7 +623,7 @@ func NewPassageApp(
 		consensusparamtypes.ModuleName,
 		vestingtypes.ModuleName,
 		claimtypes.ModuleName,
-		wasm.ModuleName,
+		wasmtypes.ModuleName,
 		circuittypes.ModuleName,
 	)
 
@@ -646,7 +648,9 @@ func NewPassageApp(
 
 	app.mm.RegisterInvariants(app.CrisisKeeper)
 	app.configurator = module.NewConfigurator(app.appCodec, app.MsgServiceRouter(), app.GRPCQueryRouter())
-	app.mm.RegisterServices(app.configurator)
+	if err := app.mm.RegisterServices(app.configurator); err != nil {
+		panic(err)
+	}
 
 	// add test gRPC service for testing gRPC queries in isolation
 	testdata.RegisterQueryServer(app.GRPCQueryRouter(), testdata.QueryImpl{})
@@ -700,7 +704,7 @@ func NewPassageApp(
 			IBCKeeper:             app.IBCKeeper,
 			WasmConfig:            wasmConfig,
 			WasmKeeper:            &app.WasmKeeper,
-			TXCounterStoreService: runtime.NewKVStoreService(keys[wasm.StoreKey]),
+			TXCounterStoreService: runtime.NewKVStoreService(keys[wasmtypes.StoreKey]),
 			CircuitKeeper:         &app.CircuitKeeper,
 			Codec:                 appCodec,
 		},
@@ -987,7 +991,7 @@ func initParamsKeeper(appCodec codec.BinaryCodec, legacyAmino *codec.LegacyAmino
 	paramsKeeper.Subspace(ibctransfertypes.ModuleName).WithKeyTable(ibctransfertypes.ParamKeyTable())
 	paramsKeeper.Subspace(ibcexported.ModuleName).WithKeyTable(ibcClientKeyTable)
 	paramsKeeper.Subspace(claimtypes.ModuleName)
-	paramsKeeper.Subspace(wasm.ModuleName)
+	paramsKeeper.Subspace(wasmtypes.ModuleName)
 
 	return paramsKeeper
 }

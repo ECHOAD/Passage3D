@@ -42,6 +42,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Improvements
+
+- Tests: `make test-contracts` runs the `passage-contracts` artifacts (legacy contracts excluded) and
+  the passage-2 contract code on a local chain across the v4.0.3 -> working tree upgrade, and compares
+  the old and new outcomes (`scripts/tests/contracts_test.sh`).
+- CI: golangci-lint configuration valid for v1.59 and the linter gates the whole tree (no more
+  `only-new-issues`); the protobuf breaking check compares against the pull request base of this
+  repository; actions updated to their Node 24 releases; the invalid `mergify.yml` workflow removed;
+  Dependabot limited to GitHub Actions.
+- app: the error of `RegisterServices` is checked; deprecated `x/wasm` aliases replaced by the
+  keeper/types symbols. No state machine change.
+- Removed unused files: `contrib/devtools`, `scripts/test_cover.sh`, the swagger script and config,
+  `third_party/proto` (buf provides the well-known types), the v3.1.0 hand-off notes, the LocalPassage
+  README (its content is in the README) and the Cosmos SDK / Regen issue and PR templates.
+
 ## v4.0.4 (consensus-breaking, on-chain upgrade `v4.0.4`)
 
 Base: v4.0.3 (Cosmos SDK v0.50.13, CometBFT v0.38.23, wasmd v0.50.0, ibc-go v8.0.0).
