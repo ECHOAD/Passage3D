@@ -26,7 +26,7 @@ that already holds it: nothing is uploaded or downloaded except the two binaries
 - `OLD_BIN`: the mainnet release plus the `in-place-testnet` command
   (branch `rehearsal/v4.0.3-in-place-testnet` = v4.0.3 `eea1f3e` + `app/testnet.go` and
   `cmd/passage/cmd/testnet_inplace.go`; consensus code unchanged, the command never runs on `start`).
-- `NEW_BIN`: the candidate (v4.1.0).
+- `NEW_BIN`: the candidate: `v4.0.x` of envadiv/Passage3D (v4.1.0, PR #217).
 
 Built on the server (Go and gcc installed):
 
@@ -34,7 +34,7 @@ Built on the server (Go and gcc installed):
 git clone https://github.com/ECHOAD/Passage3D && cd Passage3D
 git checkout rehearsal/v4.0.3-in-place-testnet
 GOTOOLCHAIN=go1.22.11 go build -tags "netgo ledger" -o ~/rehearsal/passage-old ./cmd/passage
-git checkout feat/v4.1.0-integrate-fixes
+git fetch https://github.com/envadiv/Passage3D v4.0.x && git checkout FETCH_HEAD
 GOTOOLCHAIN=go1.25.14 go build -tags "netgo ledger" -o ~/rehearsal/passage-new ./cmd/passage
 ```
 
