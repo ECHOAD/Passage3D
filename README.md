@@ -44,7 +44,7 @@ and the Passage airdrop module (`x/claim`).
 | Denom | `upasg` (1 PASG = 10^6 upasg) |
 | Address prefix | `pasg` |
 | Minimum gas price | `12.5upasg` (nodes enforce this floor) |
-| Mainnet version | v4.0.3; next upgrade `v4.0.4` ([proposal guide](docs/v4.0.4-upgrade/SUBMIT.md)) |
+| Mainnet version | v4.0.3; next upgrade `v4.1.0` ([security upgrade](docs/security-v4.1.0.md)) |
 
 For running a validator or full node see [How to run a node](https://github.com/envadiv/mainnet#join-as-a-validator).
 Set `minimum-gas-prices = "12.5upasg"` (or higher) in `app.toml`.
@@ -53,12 +53,12 @@ Set `minimum-gas-prices = "12.5upasg"` (or higher) in `app.toml`.
 
 | Component | Version |
 |---|---|
-| Cosmos SDK | v0.50.13 |
+| Cosmos SDK | v0.50.15 |
 | CometBFT | v0.38.23 |
-| IBC | ibc-go v8.0.0 |
-| CosmWasm | wasmd v0.50.0 with the Amino JSON fixes of wasmd v0.51 ([`wasmd-fork/`](wasmd-fork/PASSAGE_PATCH.md)), wasmvm v1.5.7 |
+| IBC | ibc-go v8.8.0 |
+| CosmWasm | wasmd v0.54.10, wasmvm v2.2.9 |
 | IAVL | v1.2.3 with the empty-store fixes ([`iavl-fork/`](iavl-fork/passage_empty_store_test.go)) |
-| Go | 1.22.11 |
+| Go | 1.25.14 for builds and releases (`go 1.23.2` in `go.mod`) |
 
 ## Repository layout
 
@@ -68,20 +68,21 @@ Set `minimum-gas-prices = "12.5upasg"` (or higher) in `app.toml`.
 | `app` | Application wiring, ante handlers, upgrade handlers (`app/upgrades/<version>`) |
 | `x/claim` | Airdrop claim module (`MsgClaim`, claim records and queries) |
 | `proto` | Protobuf definitions of the Passage modules |
-| `wasmd-fork`, `iavl-fork` | Patched dependencies, wired in with `replace` in `go.mod` |
+| `iavl-fork` | Patched IAVL, wired in with `replace` in `go.mod` |
 | `scripts/tests` | Docker-based upgrade, localnet and contract tests |
 | `docs` | Upgrade proposals and submit guides |
 | `.github/workflows` | CI and release pipeline |
 
 ## Build
 
-Requirements: Go 1.22.11 and gcc (Ledger support). `LEDGER_ENABLED=false` builds without gcc.
+Requirements: Go 1.25.14 and gcc (Ledger support). `LEDGER_ENABLED=false` builds without gcc.
 
 ```sh
 make build            # ./build/passage
 make install          # $GOPATH/bin/passage
 make build-linux      # static linux binary (musl + libwasmvm), built in Docker
 make docker-build     # runtime image passage:local (ports 26656, 26657, 1317, 9090)
+make release-build    # release binary + libwasmvm runtime bundle (linux, needs patchelf)
 ```
 
 ## Development
@@ -127,12 +128,15 @@ Pull requests run these workflows:
 - golangci-lint
 - CodeQL
 - buf lint and breaking-change check, when protobuf files change
+- the security upgrade rehearsal (v4.0.3 release binary -> new binary, amd64 and arm64), on
+  pull requests to `v4.0.x`
 
 ## Releases
 
-Pushing a tag `vX.Y.Z` (or `vX.Y.Z-rcN`) runs `.github/workflows/release.yml`. GoReleaser builds
-static `passage` binaries for linux amd64 and arm64 and publishes them with `sha256sum.txt`.
-The checksums go into the upgrade proposal (`docs/<version>-upgrade/`).
+Pushing a tag `vX.Y.Z` (or `vX.Y.Z-rcN`) runs `.github/workflows/release.yml`. It builds `passage`
+for linux amd64 and arm64 with `scripts/build-security-release.sh`, ships the checksum-verified
+`libwasmvm` next to it, and creates a draft release with `SHA256SUMS.txt` for review. The checksums
+go into the upgrade proposal.
 
 ## Contributing
 

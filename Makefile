@@ -108,13 +108,12 @@ docker-build:
 	$(DOCKER) build -t $(DOCKER_IMAGE):$(DOCKER_TAG) \
 		--build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) .
 
-# Release artifacts are produced by .github/workflows/release.yml (goreleaser).
-release-snapshot:
-	$(DOCKER) run --rm -e GOTOOLCHAIN=go1.22.11 -v $(CURDIR):/go/src/github.com/envadiv/Passage3D \
-		-w /go/src/github.com/envadiv/Passage3D --entrypoint /bin/bash ghcr.io/goreleaser/goreleaser-cross:v1.22.7 \
-		-c "git config --global --add safe.directory '*' && goreleaser release --snapshot --clean"
+# Release binary + libwasmvm runtime bundle, as built by .github/workflows/release.yml
+# (linux, needs Go 1.25.14 and patchelf). VERSION=v4.1.0-rc1 GOARCH=amd64 by default.
+release-build:
+	bash scripts/build-security-release.sh
 
-.PHONY: build install build-linux docker-build release-snapshot
+.PHONY: build install build-linux docker-build release-build
 
 go.sum: go.mod
 	@echo "--> Ensure dependencies have not been modified"
@@ -197,7 +196,7 @@ test-contracts:
 ###############################################################################
 
 golangci_lint_cmd=golangci-lint
-golangci_version=v1.59.1
+golangci_version=v1.64.8
 
 lint:
 	@echo "--> Running linter"
@@ -211,7 +210,7 @@ lint-fix:
 
 format:
 	@go install mvdan.cc/gofumpt@v0.6.0
-	find . -name '*.go' -type f -not -path "./wasmd-fork/*" -not -path "./iavl-fork/*" -not -path "*.git*" \
+	find . -name '*.go' -type f -not -path "./iavl-fork/*" -not -path "*.git*" \
 		-not -name "*.pb.go" -not -name "*.pb.gw.go" | xargs gofumpt -w -l
 
 .PHONY: lint lint-fix format
@@ -241,7 +240,7 @@ proto-lint:
 PROTO_BREAKING_AGAINST ?= .git\#branch=main,subdir=proto
 
 proto-check-breaking:
-	@$(protoImage) sh -c "cd proto && buf breaking --against '$(PROTO_BREAKING_AGAINST)'"
+	@$(protoImage) sh -c "cd proto && buf breaking --against '$(PROTO_BREAKING_AGAINST)' --exclude-imports"
 
 .PHONY: proto-all proto-gen proto-format proto-lint proto-check-breaking
 

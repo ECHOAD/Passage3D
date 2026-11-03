@@ -19,8 +19,8 @@ import (
 // StdSignDoc themselves, with RawContractMessage fields inlined as JSON and every
 // object's keys sorted, then sign those bytes. The node must rebuild exactly the
 // same bytes or SigVerificationDecorator rejects the tx with code 4
-// ("signature verification failed"). wasmd v0.50.0 rebuilt `msg` as base64; the
-// CosmWasm/wasmd#1844 backport in ./wasmd-fork fixes that.
+// ("signature verification failed"). wasmd v0.50.0 rebuilt `msg` as base64 and empty
+// `funds` as null; fixed in wasmd v0.51 (CosmWasm/wasmd#1844, #1860), shipped by v0.54.10.
 func TestAminoSignBytesForWasmMessagesMatchAminoClients(t *testing.T) {
 	encCfg := app.MakeEncodingConfig()
 	txCfg := encCfg.TxConfig

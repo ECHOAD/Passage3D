@@ -23,7 +23,7 @@ CONTRACTS_DIR=$(abs "${CONTRACTS_DIR:-$ROOT/../passage-workspace/passage-contrac
 
 docker run --rm \
   -e OLD_REF="${OLD_REF:-eea1f3e}" \
-  -e UPG="${UPG:-v4.0.4}" \
+  -e UPG="${UPG:-v4.1.0}" \
   -e GOFLAGS=-buildvcs=false \
   ${QUICK:+-e QUICK="$QUICK"} \
   ${MAINNET_GRPC:+-e MAINNET_GRPC="$MAINNET_GRPC"} \

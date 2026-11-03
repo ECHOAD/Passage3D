@@ -5,17 +5,18 @@
 #   docker build -t passage:local .                                    # runtime image
 #   docker build --target export --output type=local,dest=build .     # just ./build/passage
 #
-# Go and wasmvm versions MUST match go.mod (go 1.22.11, github.com/CosmWasm/wasmvm v1.5.7);
-# `passage start` refuses to run when the linked libwasmvm differs from the Go module.
+# wasmvm MUST match go.mod (github.com/CosmWasm/wasmvm/v2 v2.2.9); Go is the release toolchain
+# (scripts/build-security-release.sh). `passage start` refuses to run when the linked
+# libwasmvm differs from the Go module.
 
-ARG GO_VERSION=1.22.11
-ARG ALPINE_VERSION=3.20
+ARG GO_VERSION=1.25.14
+ARG ALPINE_VERSION=3.23
 
 FROM golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS builder
 
-ARG WASMVM_VERSION=v1.5.7
-ARG WASMVM_SHA256_X86_64=34e9dbd53ef7e734d688964b7921acd717ff19aef98b37a0b1b53f8b48b00f02
-ARG WASMVM_SHA256_AARCH64=a03ebd18bc8b9ec58598b0ca4848cb1322e62fd39de29d7e697a2d7c363be870
+ARG WASMVM_VERSION=v2.2.9
+ARG WASMVM_SHA256_X86_64=56e7c590fe11a6a51381c80c2710f71af1244acfb8cd1d5839d638313b7bd401
+ARG WASMVM_SHA256_AARCH64=4b632c22534d330b5111d7279faa7c96374e2097cbdff208cc5e040f1df41982
 # Optional overrides for the version stamp (default: from git, see Makefile).
 ARG VERSION
 ARG COMMIT
@@ -30,15 +31,14 @@ RUN set -eux; \
       aarch64) sum="$WASMVM_SHA256_AARCH64" ;; \
       *) echo "unsupported architecture: $arch"; exit 1 ;; \
     esac; \
-    wget -q "https://github.com/CosmWasm/wasmvm/releases/download/${WASMVM_VERSION}/libwasmvm_muslc.${arch}.a" -O /lib/libwasmvm_muslc.a; \
-    echo "${sum}  /lib/libwasmvm_muslc.a" | sha256sum -c -
+    wget -q "https://github.com/CosmWasm/wasmvm/releases/download/${WASMVM_VERSION}/libwasmvm_muslc.${arch}.a" -O "/lib/libwasmvm_muslc.${arch}.a"; \
+    echo "${sum}  /lib/libwasmvm_muslc.${arch}.a" | sha256sum -c -
 
 WORKDIR /code
 
 # Dependencies first for better layer caching.
 COPY go.mod go.sum ./
 COPY iavl-fork/go.mod iavl-fork/go.sum ./iavl-fork/
-COPY wasmd-fork/go.mod wasmd-fork/go.sum ./wasmd-fork/
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     go mod download

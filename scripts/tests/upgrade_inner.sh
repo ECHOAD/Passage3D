@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs inside golang:1.22.11-bookworm (see upgrade_test.sh). /src = repo (read-only), /out = results.
+# Runs inside golang:1.22.11-bookworm (see upgrade_test.sh); the new binary is built with GOTOOLCHAIN=go1.25.14. /src = repo (read-only), /out = results.
 set -u
 OUT=/out
 : > "$OUT/summary.txt"
@@ -9,7 +9,7 @@ ok()   { echo "PASS: $*"; echo "PASS: $*" >> "$OUT/summary.txt"; }
 bad()  { echo "FAIL: $*"; echo "FAIL: $*" >> "$OUT/summary.txt"; }
 check() { local d=$1; shift; if "$@"; then ok "$d"; else bad "$d"; fi; }
 
-OLD_REF=${OLD_REF:-eea1f3e}; UPG=${UPG:-v4.0.4}
+OLD_REF=${OLD_REF:-eea1f3e}; UPG=${UPG:-v4.1.0}
 CW20_URL=https://github.com/CosmWasm/cw-plus/releases/download/v1.1.2/cw20_base.wasm
 CW20_SHA256=b29237070ebbc51c1130718cf1269d1b7fa4bdebef08edfe491c173e2eb31e4e
 GAS_PRICES=12.5upasg
@@ -22,7 +22,7 @@ mkdir -p /b/new
 git clone -q /src /b/old && (cd /b/old && git checkout -q "$OLD_REF")
 tar -C /src --exclude=./build --exclude=./mytestnet --exclude=./.git -cf - . | tar -C /b/new -xf -
 (cd /b/old && go build -tags "netgo ledger" -o /usr/local/bin/passage-old ./cmd/passage) || { bad "build old"; exit 1; }
-(cd /b/new && go build -tags "netgo ledger" -o /usr/local/bin/passage-new ./cmd/passage) || { bad "build new"; exit 1; }
+(cd /b/new && GOTOOLCHAIN=go1.25.14 go build -tags "netgo ledger" -o /usr/local/bin/passage-new ./cmd/passage) || { bad "build new"; exit 1; }
 OLD=passage-old; NEW=passage-new
 curl -sSL -o /tmp/cw20.wasm "$CW20_URL" && echo "$CW20_SHA256  /tmp/cw20.wasm" | sha256sum -c - || { bad "download cw20"; exit 1; }
 
@@ -102,9 +102,9 @@ if [ $rc -ne 0 ] && grep -q "signature verification failed" /tmp/amino_old.out; 
 # Legacy ParameterChangeProposal (x/claim params) cannot even be submitted on v4.0.3.
 GOV=$($OLD q auth module-account gov --home $A -o json | jq -r '[..|.address?|select(.!=null)][0]')
 legacy_prop() { jq -n --arg gov "$GOV" --arg v "$1" '{messages:[{"@type":"/cosmos.gov.v1.MsgExecLegacyContent",authority:$gov,
-  content:{"@type":"/cosmos.params.v1beta1.ParameterChangeProposal",title:"claim denom",description:"claim denom",
-  changes:[{subspace:"claim",key:"ClaimDenom",value:("\""+$v+"\"")}]}}],deposit:"2000000upasg",title:"claim denom",summary:"claim denom",expedited:true}' > /tmp/legacy.json; }
-legacy_prop uoldtest
+  content:{"@type":"/cosmos.params.v1beta1.ParameterChangeProposal",title:"claim decay",description:"claim decay",
+  changes:[{subspace:"claim",key:"DurationOfDecay",value:("\""+$v+"\"")}]}}],deposit:"2000000upasg",title:"claim decay",summary:"claim decay",expedited:true}' > /tmp/legacy.json; }
+legacy_prop 3000000000
 R=$(txres $OLD tx gov submit-proposal /tmp/legacy.json --from val $TX)
 [ "$(echo "$R" | jq -r .code 2>/dev/null)" != "0" ] && ok "old: legacy param-change proposal rejected (no legacy router, bug reproduced)" || bad "old: legacy proposal unexpectedly accepted"
 
@@ -134,7 +134,7 @@ check "group" bash -c "$NEW q group groups-by-admin $U1 --home $A -o json | jq -
 check "cw20 contract state" test "$($NEW q wasm contract-state smart $C "{\"balance\":{\"address\":\"$U2\"}}" --home $A -o json | jq -r .data.balance)" = "100"
 check "historical query at pre-upgrade height $PRE_H" bash -c "$NEW q bank balances $U2 --height $PRE_H --home $A -o json | jq -e '.balances|length>=1' >/dev/null"
 
-step "v4.0.4 fixes"
+step "v4.1.0 fixes"
 check "bank send (new)" txok $NEW tx bank send user1 $U2 1upasg $TX
 check "wasm execute direct (new)" txok $NEW tx wasm execute $C "{\"transfer\":{\"recipient\":\"$U2\",\"amount\":\"5\"}}" --from user1 $TX
 amino_exec $NEW $NEW 11 && ok "Ledger-style amino-json MsgExecuteContract accepted" || bad "amino-json MsgExecuteContract after upgrade"
@@ -142,13 +142,13 @@ check "amino-json bank send" txok $NEW tx bank send user1 $U2 3upasg $TX --sign-
 check "expired airdrop disabled by EndAirdrop" test "$($NEW q claim params --home $A -o json | jq -r "(.params // .).airdrop_enabled")" = "false"
 R=$(txres $NEW tx claim claim ActionInitialClaim --from user1 $TX)
 echo "$R" | grep -q "cosmos.msg.v1.signer" && bad "new: MsgClaim still fails with signer error" || ok "new: MsgClaim signer resolved (module error only: $(echo "$R" | jq -r .raw_log 2>/dev/null | head -c 80))"
-legacy_prop uclaimtest
+legacy_prop 2000000000
 check "legacy param-change proposal submitted" txok $NEW tx gov submit-proposal /tmp/legacy.json --from val $TX
 LPID=$($NEW q gov proposals --home $A -o json | jq -r '.proposals[-1].id')
 check "legacy param-change vote" txok $NEW tx gov vote $LPID yes --from val $TX --gas 400000
 sleep 15
 check "legacy proposal passed" bash -c "$NEW q gov proposal $LPID --home $A -o json | jq -r '[..|.status?|select(.!=null)][0]' | grep -qE '^(PROPOSAL_STATUS_PASSED|3)$'"
-check "x/claim param changed by governance" test "$($NEW q claim params --home $A -o json | jq -r "(.params // .).claim_denom")" = "uclaimtest"
+check "x/claim param changed by governance" test "$($NEW q claim params --home $A -o json | jq -r "(.params // .).duration_of_decay")" = "2s"
 H2=$(( $(height 26657) + 3 )); waith $H2 26657; waith $H2 36657
 check "app_hash equal on both nodes at $H2" test "$(curl -s "localhost:26657/block?height=$H2" | jq -r .result.block.header.app_hash)" = "$(curl -s "localhost:36657/block?height=$H2" | jq -r .result.block.header.app_hash)"
 

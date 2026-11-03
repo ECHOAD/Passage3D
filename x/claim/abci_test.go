@@ -45,7 +45,7 @@ func claimModuleTransfers(events []abci.Event, moduleAddr string) (spent, transf
 }
 
 func TestEndBlockerEndsAirdropOnce(t *testing.T) {
-	a := app.Setup(false)
+	a := app.Setup(false, t)
 	ctx := deliverCtx(a, now)
 	claim.InitGenesis(ctx, a.ClaimKeeper, testGenesis())
 
@@ -90,7 +90,7 @@ func TestEndBlockerEndsAirdropOnce(t *testing.T) {
 // With nothing left in the module account EndAirdrop must not try to fund the
 // community pool, but it still disables the airdrop.
 func TestEndBlockerEndsAirdropWithEmptyModuleAccount(t *testing.T) {
-	a := app.Setup(false)
+	a := app.Setup(false, t)
 	ctx := deliverCtx(a, now)
 	genesis := testGenesis()
 	genesis.ModuleAccountBalance = sdk.NewInt64Coin(types.DefaultClaimDenom, 0)
@@ -111,7 +111,7 @@ func TestEndBlockerEndsAirdropWithEmptyModuleAccount(t *testing.T) {
 // TestEndAirdropAcrossBlocks runs the same scenario through FinalizeBlock and
 // Commit, i.e. with the module manager's EndBlock wiring and real block events.
 func TestEndAirdropAcrossBlocks(t *testing.T) {
-	a := app.Setup(false)
+	a := app.Setup(false, t)
 	ctx := deliverCtx(a, now)
 	claim.InitGenesis(ctx, a.ClaimKeeper, testGenesis())
 	balance := a.ClaimKeeper.GetModuleAccountBalance(ctx)

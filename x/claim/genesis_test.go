@@ -69,7 +69,7 @@ func requireUniqueAccountNumbers(t *testing.T, ctx sdk.Context, a *app.PassageAp
 }
 
 func TestClaimInitGenesis(t *testing.T) {
-	a := app.Setup(false)
+	a := app.Setup(false, t)
 	ctx := deliverCtx(a, now.Add(time.Second))
 	genesis := testGenesis()
 	claim.InitGenesis(ctx, a.ClaimKeeper, genesis)
@@ -117,7 +117,7 @@ func TestClaimInitGenesisWithGenesisAccountNumberZero(t *testing.T) {
 // the auth genesis, so x/claim InitGenesis has to create it.
 func TestInitChainCreatesClaimModuleAccountWithUniqueNumber(t *testing.T) {
 	var a *app.PassageApp
-	require.NotPanics(t, func() { a = app.Setup(false) })
+	require.NotPanics(t, func() { a = app.Setup(false, t) })
 
 	ctx := a.BaseApp.NewContext(true)
 	moduleAcc := a.AccountKeeper.GetAccount(ctx, a.ClaimKeeper.GetModuleAccountAddress(ctx))
@@ -127,7 +127,7 @@ func TestInitChainCreatesClaimModuleAccountWithUniqueNumber(t *testing.T) {
 }
 
 func TestClaimExportGenesis(t *testing.T) {
-	a := app.Setup(false)
+	a := app.Setup(false, t)
 	ctx := deliverCtx(a, now.Add(time.Second))
 	genesis := testGenesis()
 	claim.InitGenesis(ctx, a.ClaimKeeper, genesis)
@@ -159,7 +159,7 @@ func TestGenesisExportImportRoundTrip(t *testing.T) {
 	encCfg := app.MakeEncodingConfig()
 	cdc := encCfg.Marshaler
 
-	src := app.Setup(false)
+	src := app.Setup(false, t)
 	srcCtx := deliverCtx(src, now.Add(time.Second))
 	claim.InitGenesis(srcCtx, src.ClaimKeeper, testGenesis())
 	_, err := src.ClaimKeeper.ClaimCoinsForAction(srcCtx, acc1, types.ActionInitialClaim)
@@ -167,7 +167,7 @@ func TestGenesisExportImportRoundTrip(t *testing.T) {
 
 	exported := claim.NewAppModule(cdc, src.ClaimKeeper).ExportGenesis(srcCtx, cdc)
 
-	dst := app.Setup(false)
+	dst := app.Setup(false, t)
 	dstCtx := deliverCtx(dst, now.Add(time.Second))
 	dstModule := claim.NewAppModule(cdc, dst.ClaimKeeper)
 	require.NotPanics(t, func() { dstModule.InitGenesis(dstCtx, cdc, exported) })

@@ -10,15 +10,18 @@ import (
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/stretchr/testify/require"
 
+	"cosmossdk.io/core/header"
 	upgradetypes "cosmossdk.io/x/upgrade/types"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/module"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
 	paramproposal "github.com/cosmos/cosmos-sdk/x/params/types/proposal"
 
-	v404 "github.com/envadiv/Passage3D/app/upgrades/v4.0.4"
+	v410 "github.com/envadiv/Passage3D/app/upgrades/v4.1.0"
 	claimtypes "github.com/envadiv/Passage3D/x/claim/types"
 )
 
@@ -78,7 +81,7 @@ func requireUniqueAccountNumbers(t *testing.T, app *PassageApp, ctx sdk.Context)
 // A fresh genesis with a genesis account numbered 0 used to panic in x/claim
 // InitGenesis ("collections: conflict: index uniqueness constrain violation: 0").
 func TestFreshGenesisHasUniqueAccountNumbers(t *testing.T) {
-	app := Setup(false)
+	app := Setup(false, t)
 	ctx := deliverCtx(app)
 
 	claimAcc := app.AccountKeeper.GetAccount(ctx, app.AccountKeeper.GetModuleAddress(claimtypes.ModuleName))
@@ -91,7 +94,7 @@ func TestFreshGenesisHasUniqueAccountNumbers(t *testing.T) {
 func TestExportAndReimport(t *testing.T) {
 	for _, forZeroHeight := range []bool{false, true} {
 		t.Run(fmt.Sprintf("forZeroHeight=%v", forZeroHeight), func(t *testing.T) {
-			app := Setup(false)
+			app := Setup(false, t)
 			for i := 0; i < 3; i++ {
 				nextBlock(t, app)
 			}
@@ -128,7 +131,7 @@ func TestExportAndReimport(t *testing.T) {
 
 // Only the requested modules are exported.
 func TestExportModulesToExport(t *testing.T) {
-	app := Setup(false)
+	app := Setup(false, t)
 	exported, err := app.ExportAppStateAndValidators(false, nil, []string{"bank"})
 	require.NoError(t, err)
 
@@ -140,15 +143,21 @@ func TestExportModulesToExport(t *testing.T) {
 
 // passage-2 holds two accounts with account number 0: a vesting multisig (owner
 // of the index entry) and the claim module account, created under SDK v0.45 by
-// the old x/claim InitGenesis. The v4.0.4 upgrade handler must give the claim
+// the old x/claim InitGenesis. The v4.1.0 upgrade handler must give the claim
 // account a fresh number and keep the owner's index entry.
-func TestUpgradeV404RepairsDuplicateAccountNumber(t *testing.T) {
-	app := Setup(false)
+func TestUpgradeV410RepairsDuplicateAccountNumber(t *testing.T) {
+	app := Setup(false, t)
 	ctx := deliverCtx(app)
 	ak := app.AccountKeeper
 
-	owner, err := ak.Accounts.Indexes.Number.MatchExact(ctx, 0)
+	// The account that owns number 0 (the vesting multisig on passage-2).
+	owner := sdk.AccAddress(secp256k1.GenPrivKey().PubKey().Address())
+	ownerAcc := ak.NewAccountWithAddress(ctx, owner)
+	require.NoError(t, ownerAcc.SetAccountNumber(0))
+	ak.SetAccount(ctx, ownerAcc)
+	indexed, err := ak.Accounts.Indexes.Number.MatchExact(ctx, 0)
 	require.NoError(t, err)
+	require.True(t, indexed.Equals(owner))
 
 	claimAddr := ak.GetModuleAddress(claimtypes.ModuleName)
 	claimAcc := ak.GetAccount(ctx, claimAddr)
@@ -175,16 +184,16 @@ func TestUpgradeV404RepairsDuplicateAccountNumber(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, stolen.Equals(claimAddr), "precondition: re-saving the duplicate steals index entry 0")
 
-	// Run the real v4.0.4 upgrade handler.
-	handler := v404.CreateUpgradeHandler(
+	// Run the real v4.1.0 upgrade handler.
+	handler := v410.CreateUpgradeHandler(
 		app.mm, app.configurator, app.DistrKeeper, app.BankKeeper, app.AccountKeeper, app.ClaimKeeper,
 		app.ConsensusParamsKeeper, app.ParamsKeeper, app.StakingKeeper, app.GovKeeper,
 	)
 	fromVM, err := app.UpgradeKeeper.GetModuleVersionMap(ctx)
 	require.NoError(t, err)
-	toVM, err := handler(ctx, upgradetypes.Plan{Name: v404.Name, Height: ctx.BlockHeight()}, fromVM)
+	toVM, err := handler(ctx, upgradetypes.Plan{Name: v410.Name, Height: ctx.BlockHeight()}, fromVM)
 	require.NoError(t, err)
-	require.Equal(t, fromVM, toVM, "v4.0.4 must not bump any module consensus version")
+	require.Equal(t, fromVM, toVM, "v4.1.0 must not bump any module consensus version")
 
 	repaired := ak.GetAccount(ctx, claimAddr)
 	require.NotEqual(t, uint64(0), repaired.GetAccountNumber())
@@ -197,7 +206,7 @@ func TestUpgradeV404RepairsDuplicateAccountNumber(t *testing.T) {
 	requireUniqueAccountNumbers(t, app, ctx)
 
 	// Idempotent.
-	changed, err := v404.FixDuplicateAccountNumbers(ctx, ak)
+	changed, err := v410.FixDuplicateAccountNumbers(ctx, ak)
 	require.NoError(t, err)
 	require.Empty(t, changed)
 
@@ -218,7 +227,7 @@ func TestUpgradeV404RepairsDuplicateAccountNumber(t *testing.T) {
 // x/claim params live in an x/params subspace; governance can only change them
 // through a legacy ParameterChangeProposal, which needs the legacy gov router.
 func TestLegacyParamChangeProposalUpdatesClaimParams(t *testing.T) {
-	app := Setup(false)
+	app := Setup(false, t)
 	ctx := deliverCtx(app)
 
 	require.NotNil(t, app.GovKeeper.LegacyRouter(), "legacy gov router must be registered")
@@ -238,4 +247,41 @@ func TestLegacyParamChangeProposalUpdatesClaimParams(t *testing.T) {
 
 	// A text proposal (v1beta1 content) must also be routable.
 	require.True(t, app.GovKeeper.LegacyRouter().HasRoute(govtypes.RouterKey))
+}
+
+// The module version map stored by InitChain matches every module's consensus version.
+func TestUpgradeStateOnGenesis(t *testing.T) {
+	app := Setup(false, t)
+	ctx := deliverCtx(app)
+	vm, err := app.UpgradeKeeper.GetModuleVersionMap(ctx)
+	require.NoError(t, err)
+	for name, mod := range app.mm.Modules {
+		if cv, ok := mod.(module.HasConsensusVersion); ok {
+			require.Equal(t, cv.ConsensusVersion(), vm[name], name)
+		}
+	}
+}
+
+// The registered v4.1.0 handler runs through the upgrade keeper and keeps module
+// versions, wasm params and the supply unchanged.
+func TestSecurityUpgrade(t *testing.T) {
+	app := Setup(false, t)
+	ctx := deliverCtx(app)
+	require.True(t, app.UpgradeKeeper.HasHandler(v410.Name))
+	before, err := app.UpgradeKeeper.GetModuleVersionMap(ctx)
+	require.NoError(t, err)
+	wasmBefore := app.WasmKeeper.GetParams(ctx)
+	supplyBefore := app.BankKeeper.GetSupply(ctx, "upasg")
+	plan := upgradetypes.Plan{Name: v410.Name, Height: ctx.BlockHeight() + 1}
+	require.NoError(t, app.UpgradeKeeper.ScheduleUpgrade(ctx, plan))
+	upgradeCtx := ctx.WithBlockHeight(plan.Height).WithHeaderInfo(header.Info{Height: plan.Height})
+	require.NoError(t, app.UpgradeKeeper.ApplyUpgrade(upgradeCtx, plan))
+	after, err := app.UpgradeKeeper.GetModuleVersionMap(ctx)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	require.Equal(t, wasmBefore, app.WasmKeeper.GetParams(ctx))
+	require.Equal(t, supplyBefore, app.BankKeeper.GetSupply(ctx, "upasg"))
+	height, err := app.UpgradeKeeper.GetDoneHeight(ctx, plan.Name)
+	require.NoError(t, err)
+	require.Equal(t, plan.Height, height)
 }

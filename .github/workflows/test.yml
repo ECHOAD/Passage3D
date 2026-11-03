@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - v4.0.x
 
 jobs:
   unit:
@@ -16,12 +17,13 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          # Same toolchain as the release build (scripts/build-security-release.sh).
+          go-version: '1.25.14'
       - name: go vet
         run: go vet ./...
       - name: unit tests
         run: make test-cover
-      - name: Passage tests of the vendored forks (iavl-fork, wasmd-fork amino)
+      - name: Passage tests of the vendored iavl-fork and Amino JSON signing
         run: make test-forks
       - name: Upload codecov report
         uses: codecov/codecov-action@v4
