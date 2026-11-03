@@ -32,3 +32,25 @@ the Passage Marketplace
 
 ## Run a node
 For operating a validator/fullnode see [How to run a node](https://github.com/envadiv/mainnet#join-as-a-validator).
+
+## Development
+
+Requirements: Go 1.22.11 and gcc (`LEDGER_ENABLED=false` builds without gcc). The Docker targets
+only need Docker.
+
+| Target | What it does |
+|--------|--------------|
+| `make build` / `make install` | Build `passage` into `./build` / `$GOPATH/bin` |
+| `make build-linux` | Static linux binary (musl + libwasmvm), built in Docker |
+| `make test` | Unit tests |
+| `make test-forks` | Passage tests of the vendored `iavl-fork` and `app/params` |
+| `make test-sim-*` | Application simulations (full, import/export, after-import, non-determinism) |
+| `make test-upgrade` | In-place upgrade from the mainnet release (v4.0.3) to the working tree, two nodes, in Docker |
+| `make test-contracts` | CosmWasm contracts (`passage-contracts` artifacts and passage-2 code) across the same upgrade, in Docker |
+| `make lint` | golangci-lint |
+| `make proto-gen` / `make proto-lint` | Protobuf code generation / lint (Docker) |
+| `make localnet-start` / `localnet-stop` / `localnet-clean` | 4-validator localnet (`docker-compose.yml`, configuration in `./mytestnet`) |
+
+`make test-contracts` reads the contract artifacts from `../passage-workspace/passage-contracts/artifacts`
+(override with `CONTRACTS_DIR`) and downloads the passage-2 code over gRPC (or `MAINNET_DIR` with
+`code_<id>.wasm` files); `QUICK=1` runs the scenarios on the working tree only, without the upgrade.
