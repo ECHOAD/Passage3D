@@ -184,9 +184,14 @@ test-sim-custom-genesis:
 test-upgrade:
 	bash scripts/tests/upgrade_test.sh
 
+# Passage contracts (passage-contracts artifacts, legacy excluded) and passage-2 contract code
+# across the v4.0.3 -> working tree upgrade, in Docker. CONTRACTS_DIR / MAINNET_DIR / QUICK=1.
+test-contracts:
+	bash scripts/tests/contracts_test.sh
+
 .PHONY: test test-unit test-race test-cover test-forks test-all \
 	test-sim-full test-sim-import-export test-sim-after-import test-sim-nondeterminism \
-	test-sim-custom-genesis test-upgrade
+	test-sim-custom-genesis test-upgrade test-contracts
 
 ###############################################################################
 ###                                Linting                                  ###
