@@ -8,7 +8,6 @@ LEDGER_ENABLED ?= true
 BINDIR ?= $(GOPATH)/bin
 BUILDDIR ?= $(CURDIR)/build
 SIMAPP = ./app
-HTTPS_GIT := https://github.com/envadiv/Passage3D.git
 DOCKER := $(shell which docker)
 DOCKER_IMAGE ?= passage
 DOCKER_TAG ?= local
@@ -237,8 +236,12 @@ proto-format:
 proto-lint:
 	@$(protoImage) sh -c "cd proto && buf lint --error-format=json"
 
+# Breaking-change check of ./proto against a git input (default: the local main branch). CI passes
+# the pull request base: PROTO_BREAKING_AGAINST='https://github.com/<repo>.git#branch=<base>,subdir=proto'
+PROTO_BREAKING_AGAINST ?= .git\#branch=main,subdir=proto
+
 proto-check-breaking:
-	@$(protoImage) sh -c "cd proto && buf breaking --against $(HTTPS_GIT)#branch=main,subdir=proto"
+	@$(protoImage) sh -c "cd proto && buf breaking --against '$(PROTO_BREAKING_AGAINST)'"
 
 .PHONY: proto-all proto-gen proto-format proto-lint proto-check-breaking
 
